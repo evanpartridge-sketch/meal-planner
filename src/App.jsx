@@ -371,7 +371,7 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked }) {
                         padding: "7px 0",
                         borderBottom: "1px solid #f0ebe2",
                       }}>
-                        {ing}
+                        {ing.replace(/(\d)([a-zA-Z])/g, "$1 $2")}
                       </div>
                     ))}
                   </div>
