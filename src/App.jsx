@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const GOOGLE_CLIENT_ID = "730204181239-qhan4dk94d69e94lb1dt55b4k1j58pri.apps.googleusercontent.com";
-const DRIVE_FOLDER_ID = "1PvpVnSRnqh3rfLV-4glXShPtSfyrzPvW";
+const DRIVE_FOLDER_ID = "1OwlVzGl91UjJegeyYJP1efQTq2eLZ-qO";
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const CALORIE_GOAL = 1800;
 
@@ -84,10 +84,17 @@ function recipeEmoji(id) {
 
 async function fetchRecipesFromDrive(token) {
   // List all JSON files in the folder
+  const q = encodeURIComponent(
+    `'${DRIVE_FOLDER_ID}' in parents and mimeType='application/json' and trashed=false`
+  );
   const listRes = await fetch(
-    `${DRIVE_API}/files?q='${DRIVE_FOLDER_ID}'+in+parents+and+mimeType='application/json'+and+trashed=false&fields=files(id,name)&pageSize=200`,
+    `${DRIVE_API}/files?q=${q}&fields=files(id,name)&pageSize=200`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
+  if (!listRes.ok) {
+    const err = await listRes.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `Drive API error ${listRes.status}`);
+  }
   const listData = await listRes.json();
   if (!listData.files || listData.files.length === 0) return [];
 
@@ -99,6 +106,7 @@ async function fetchRecipesFromDrive(token) {
           `${DRIVE_API}/files/${file.id}?alt=media`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
+        if (!contentRes.ok) return null;
         return await contentRes.json();
       } catch {
         return null;
@@ -430,8 +438,8 @@ export default function MealPlannerApp() {
                         })}
 
                         {MEALS.map(meal => (
-                          <>
-                            <div key={meal} style={{
+                          <React.Fragment key={meal}>
+                            <div style={{
                               display: "flex", alignItems: "center", justifyContent: "flex-end",
                               paddingRight: 10, paddingTop: 6
                             }}>
@@ -489,7 +497,7 @@ export default function MealPlannerApp() {
                                 </div>
                               );
                             })}
-                          </>
+                          </React.Fragment>
                         ))}
                       </div>
                     </div>
