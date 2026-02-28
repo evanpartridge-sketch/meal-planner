@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const GOOGLE_CLIENT_ID = "730204181239-qhan4dk94d69e94lb1dt55b4k1j58pri.apps.googleusercontent.com";
-const DRIVE_FOLDER_ID = "1PvpVnSRnqh3rfLV-4glXShPtSfyrzPvW";
+const DRIVE_FOLDER_ID = "1OwlVzGl91UjJegeyYJP1efQTq2eLZ-qO";
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const CALORIE_GOAL = 1800;
 
@@ -84,10 +84,17 @@ function recipeEmoji(id) {
 
 async function fetchRecipesFromDrive(token) {
   // List all JSON files in the folder
+  const q = encodeURIComponent(
+    `'${DRIVE_FOLDER_ID}' in parents and mimeType='application/json' and trashed=false`
+  );
   const listRes = await fetch(
-    `${DRIVE_API}/files?q='${DRIVE_FOLDER_ID}'+in+parents+and+mimeType='application/json'+and+trashed=false&fields=files(id,name)&pageSize=200`,
+    `${DRIVE_API}/files?q=${q}&fields=files(id,name)&pageSize=200`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
+  if (!listRes.ok) {
+    const err = await listRes.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `Drive API error ${listRes.status}`);
+  }
   const listData = await listRes.json();
   if (!listData.files || listData.files.length === 0) return [];
 
@@ -99,6 +106,7 @@ async function fetchRecipesFromDrive(token) {
           `${DRIVE_API}/files/${file.id}?alt=media`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
+        if (!contentRes.ok) return null;
         return await contentRes.json();
       } catch {
         return null;
@@ -184,6 +192,434 @@ function SignInScreen({ onSignIn }) {
   );
 }
 
+// ─── Recipe Detail Modal ──────────────────────────────────────────────────────
+
+function RecipeDetail({ recipe, onClose, onRate, onMarkCooked }) {
+  useEffect(() => {
+    function handleKey(e) { if (e.key === "Escape") onClose(); }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  const timeEntries = Object.entries(recipe.times || {}).filter(([, v]) => v);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 200,
+        background: "rgba(0,0,0,0.55)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: "24px 16px",
+        overflowY: "auto",
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "#faf7f2",
+          borderRadius: 14,
+          width: "100%",
+          maxWidth: 860,
+          maxHeight: "90vh",
+          overflowY: "auto",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.35)",
+          position: "relative",
+          fontFamily: "'DM Sans', 'Segoe UI', sans-serif",
+        }}
+      >
+        {/* ── Hero ── */}
+        <div style={{ position: "relative" }}>
+          {recipe.image ? (
+            <img
+              src={recipe.image}
+              alt={recipe.title}
+              style={{ width: "100%", height: 300, objectFit: "cover", borderRadius: "14px 14px 0 0", display: "block" }}
+            />
+          ) : (
+            <div style={{
+              height: 200, borderRadius: "14px 14px 0 0",
+              background: "linear-gradient(135deg, #2a2420 0%, #3d3128 100%)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 72,
+            }}>
+              {recipeEmoji(recipe.id)}
+            </div>
+          )}
+          {/* Close button */}
+          <button
+            onClick={onClose}
+            style={{
+              position: "absolute", top: 14, right: 14,
+              width: 36, height: 36, borderRadius: "50%",
+              background: "rgba(0,0,0,0.45)", border: "none",
+              color: "#fff", fontSize: 20, lineHeight: 1,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              backdropFilter: "blur(4px)",
+            }}
+          >×</button>
+        </div>
+
+        {/* ── Content ── */}
+        <div style={{ padding: "28px 36px 36px" }}>
+
+          {/* Title + author + rating row */}
+          <h1 style={{
+            fontFamily: "'Cormorant Garamond', serif",
+            fontSize: 38, fontWeight: 700, margin: "0 0 6px",
+            lineHeight: 1.15, color: "#1c1915",
+          }}>
+            {recipe.title}
+          </h1>
+          {recipe.author && (
+            <div style={{ fontSize: 13, color: "#8a7f72", marginBottom: 14 }}>
+              By {recipe.author}
+            </div>
+          )}
+
+          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20, flexWrap: "wrap" }}>
+            <StarRating rating={recipe.rating} onChange={onRate} />
+            {recipe.timesCooked > 0 && (
+              <span style={{ fontSize: 12, color: "#4a7c59", fontWeight: 500 }}>
+                ✓ Made {recipe.timesCooked}×
+              </span>
+            )}
+            <button
+              onClick={onMarkCooked}
+              style={{
+                marginLeft: "auto",
+                background: "none", border: "1px solid #c8a03c",
+                borderRadius: 8, padding: "5px 14px",
+                fontSize: 12, color: "#c8a03c", fontWeight: 500,
+                cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+              }}
+            >
+              + Mark as Cooked
+            </button>
+          </div>
+
+          {/* Stats row */}
+          {(timeEntries.length > 0 || recipe.yield || recipe.caloriesPerServing) && (
+            <>
+              <div style={{ height: 1, background: "#e8e0d4", margin: "0 0 20px" }} />
+              <div style={{ display: "flex", gap: 32, flexWrap: "wrap", marginBottom: 20 }}>
+                {timeEntries.map(([label, value]) => (
+                  <div key={label}>
+                    <div style={{ fontSize: 10, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 500, marginBottom: 3 }}>
+                      {label}
+                    </div>
+                    <div style={{ fontSize: 15, color: "#1c1915", fontWeight: 500 }}>{value}</div>
+                  </div>
+                ))}
+                {recipe.yield && (
+                  <div>
+                    <div style={{ fontSize: 10, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 500, marginBottom: 3 }}>
+                      Yield
+                    </div>
+                    <div style={{ fontSize: 15, color: "#1c1915", fontWeight: 500 }}>{recipe.yield}</div>
+                  </div>
+                )}
+                {recipe.caloriesPerServing && (
+                  <div>
+                    <div style={{ fontSize: 10, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 500, marginBottom: 3 }}>
+                      Calories
+                    </div>
+                    <div style={{ fontSize: 15, color: "#1c1915", fontWeight: 500 }}>{recipe.caloriesPerServing} / serving</div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* Description */}
+          {recipe.description && (
+            <>
+              <div style={{ height: 1, background: "#e8e0d4", margin: "0 0 20px" }} />
+              <p style={{
+                fontSize: 14, color: "#5a544c", lineHeight: 1.75,
+                fontStyle: "italic", margin: "0 0 20px",
+              }}>
+                {recipe.description}
+              </p>
+            </>
+          )}
+
+          {/* Ingredients + Instructions two-column */}
+          {(recipe.ingredients?.length > 0 || recipe.instructions?.length > 0) && (
+            <>
+              <div style={{ height: 1, background: "#e8e0d4", margin: "0 0 28px" }} />
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: recipe.instructions?.length > 0 ? "1fr 1.8fr" : "1fr",
+                gap: 40,
+                alignItems: "start",
+              }}>
+
+                {/* Ingredients */}
+                {recipe.ingredients?.length > 0 && (
+                  <div>
+                    <div style={{
+                      fontSize: 10, color: "#8a7f72", textTransform: "uppercase",
+                      letterSpacing: "0.1em", fontWeight: 500,
+                      borderBottom: "1px solid #c8a03c", paddingBottom: 8, marginBottom: 16,
+                    }}>
+                      Ingredients
+                    </div>
+                    {recipe.ingredients.map((ing, i) => (
+                      <div key={i} style={{
+                        fontSize: 14, color: "#1c1915", lineHeight: 1.7,
+                        padding: "7px 0",
+                        borderBottom: "1px solid #f0ebe2",
+                      }}>
+                        {ing.replace(/(\d)([a-zA-Z])/g, "$1 $2")}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Instructions */}
+                {recipe.instructions?.length > 0 && (
+                  <div>
+                    <div style={{
+                      fontSize: 10, color: "#8a7f72", textTransform: "uppercase",
+                      letterSpacing: "0.1em", fontWeight: 500,
+                      borderBottom: "1px solid #c8a03c", paddingBottom: 8, marginBottom: 16,
+                    }}>
+                      Preparation
+                    </div>
+                    {recipe.instructions.map((step, i) => (
+                      <div key={i} style={{ display: "flex", gap: 16, marginBottom: 22 }}>
+                        <div style={{
+                          fontFamily: "'Cormorant Garamond', serif",
+                          fontSize: 22, fontWeight: 700, color: "#c8a03c",
+                          lineHeight: 1, paddingTop: 2, minWidth: 24, flexShrink: 0,
+                        }}>
+                          {i + 1}
+                        </div>
+                        <p style={{ fontSize: 14, color: "#1c1915", lineHeight: 1.8, margin: 0 }}>
+                          {step}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* Tags + source link */}
+          {(recipe.tags?.length > 0 || recipe.sourceUrl) && (
+            <>
+              <div style={{ height: 1, background: "#e8e0d4", margin: "28px 0 20px" }} />
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                {recipe.tags?.map(tag => (
+                  <span key={tag} style={{
+                    background: "#f0ebe2", borderRadius: 20,
+                    padding: "3px 11px", fontSize: 11, color: "#8a7f72", fontWeight: 500,
+                  }}>{tag}</span>
+                ))}
+                {recipe.sourceUrl && (
+                  <a
+                    href={recipe.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      marginLeft: "auto", fontSize: 12, color: "#c8a03c",
+                      textDecoration: "none", fontWeight: 500,
+                      display: "flex", alignItems: "center", gap: 4,
+                    }}
+                  >
+                    View on NYT Cooking ↗
+                  </a>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Recipe Picker Modal ──────────────────────────────────────────────────────
+
+function RecipePicker({ recipes, target, search, onSearchChange, onSelect, onClose }) {
+  useEffect(() => {
+    function handleKey(e) { if (e.key === "Escape") onClose(); }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  const filtered = recipes.filter(r =>
+    r.title.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0,
+        background: "rgba(0,0,0,0.45)",
+        zIndex: 200,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "#faf7f2",
+          borderRadius: 16,
+          width: "90%",
+          maxWidth: 560,
+          maxHeight: "70vh",
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: "0 24px 64px rgba(0,0,0,0.3)",
+          overflow: "hidden",
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          padding: "20px 20px 0",
+          borderBottom: "1px solid #e8e0d4",
+          paddingBottom: 16,
+          flexShrink: 0,
+        }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 4 }}>
+            <div>
+              <div style={{
+                fontFamily: "'Cormorant Garamond', serif",
+                fontSize: 22,
+                fontWeight: 700,
+                color: "#1c1915",
+                lineHeight: 1.2,
+              }}>Pick a Recipe</div>
+              {target && (
+                <div style={{ fontSize: 13, color: "#8a7f72", marginTop: 3 }}>
+                  For {target.day} · {target.meal}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={onClose}
+              style={{
+                background: "rgba(0,0,0,0.06)",
+                border: "none",
+                borderRadius: 20,
+                width: 32, height: 32,
+                cursor: "pointer",
+                fontSize: 18,
+                color: "#8a7f72",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0,
+                marginLeft: 12,
+              }}
+            >×</button>
+          </div>
+
+          {/* Search */}
+          <div style={{ position: "relative", marginTop: 14 }}>
+            <span style={{
+              position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)",
+              fontSize: 14, color: "#c0b8ac", pointerEvents: "none",
+            }}>🔍</span>
+            <input
+              autoFocus
+              type="text"
+              placeholder="Search recipes..."
+              value={search}
+              onChange={e => onSearchChange(e.target.value)}
+              style={{
+                width: "100%",
+                border: "1.5px solid #e8e0d4",
+                borderRadius: 10,
+                padding: "10px 14px 10px 36px",
+                fontSize: 13,
+                fontFamily: "'DM Sans', sans-serif",
+                color: "#1c1915",
+                background: "#fff",
+                outline: "none",
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Scrollable recipe grid */}
+        <div style={{ overflowY: "auto", flex: 1, padding: 16 }}>
+          {filtered.length === 0 ? (
+            <div style={{
+              textAlign: "center", padding: "40px 0",
+              color: "#8a7f72", fontSize: 14,
+            }}>
+              No recipes match "{search}"
+            </div>
+          ) : (
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+              gap: 12,
+            }}>
+              {filtered.map(recipe => (
+                <div
+                  key={recipe.id}
+                  onClick={() => onSelect(recipe)}
+                  className="picker-card"
+                  style={{
+                    background: "#fff",
+                    border: "1.5px solid #e8e0d4",
+                    borderRadius: 10,
+                    overflow: "hidden",
+                    cursor: "pointer",
+                  }}
+                >
+                  {/* Thumbnail */}
+                  {recipe.image ? (
+                    <img
+                      src={recipe.image}
+                      alt={recipe.title}
+                      style={{ width: "100%", height: 80, objectFit: "cover", display: "block" }}
+                    />
+                  ) : (
+                    <div style={{
+                      height: 80,
+                      background: "linear-gradient(135deg, #2a2420 0%, #3d3128 100%)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 28,
+                    }}>
+                      {recipeEmoji(recipe.id)}
+                    </div>
+                  )}
+                  {/* Title */}
+                  <div style={{
+                    padding: "8px 10px 4px",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "#1c1915",
+                    lineHeight: 1.35,
+                    display: "-webkit-box",
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: "vertical",
+                    overflow: "hidden",
+                  }}>
+                    {recipe.title}
+                  </div>
+                  {/* Time */}
+                  {recipe.times?.["total time"] && (
+                    <div style={{ padding: "0 10px 8px", fontSize: 10, color: "#8a7f72" }}>
+                      ⏱ {recipe.times["total time"]}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 export default function MealPlannerApp() {
@@ -192,8 +628,8 @@ export default function MealPlannerApp() {
   const [plan, setPlan] = useState(EMPTY_PLAN);
   const [checkedItems, setCheckedItems] = useState({});
   const [selectedRecipe, setSelectedRecipe] = useState(null);
-  const [dragOver, setDragOver] = useState(null);
-  const [dragging, setDragging] = useState(null);
+  const [pickerTarget, setPickerTarget] = useState(null); // { day, meal } | null
+  const [pickerSearch, setPickerSearch] = useState("");
 
   // Auth state
   const [token, setToken] = useState(null);
@@ -236,6 +672,10 @@ export default function MealPlannerApp() {
     setRecipes(rs => rs.map(r => r.id === id ? { ...r, rating } : r));
   }
 
+  function markCooked(id) {
+    setRecipes(rs => rs.map(r => r.id === id ? { ...r, timesCooked: (r.timesCooked || 0) + 1 } : r));
+  }
+
   const tabs = [
     { id: "planner", label: "Week Planner", icon: "📅" },
     { id: "recipes", label: "My Recipes", icon: "📖" },
@@ -260,8 +700,10 @@ export default function MealPlannerApp() {
         .tab-btn:hover { background: rgba(200,160,60,0.12) !important; }
         .recipe-card { transition: transform 0.15s, box-shadow 0.15s; cursor: pointer; }
         .recipe-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.1) !important; }
-        .meal-slot { transition: background 0.15s, border-color 0.15s; }
+        .meal-slot { transition: background 0.15s, border-color 0.15s; cursor: pointer; }
         .meal-slot:hover { background: rgba(200,160,60,0.06) !important; }
+        .picker-card { transition: border-color 0.12s, background 0.12s; }
+        .picker-card:hover { border-color: #c8a03c !important; background: #fffbf0 !important; }
         .check-item { transition: opacity 0.2s; }
         .check-item.checked { opacity: 0.45; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
@@ -350,6 +792,32 @@ export default function MealPlannerApp() {
         </div>
       </header>
 
+      {/* Recipe Picker Modal */}
+      {pickerTarget && (
+        <RecipePicker
+          recipes={recipes}
+          target={pickerTarget}
+          search={pickerSearch}
+          onSearchChange={setPickerSearch}
+          onSelect={recipe => {
+            addToPlan(pickerTarget.day, pickerTarget.meal, recipe.id);
+            setPickerTarget(null);
+            setPickerSearch("");
+          }}
+          onClose={() => { setPickerTarget(null); setPickerSearch(""); }}
+        />
+      )}
+
+      {/* Recipe Detail Modal */}
+      {selectedRecipe && (
+        <RecipeDetail
+          recipe={selectedRecipe}
+          onClose={() => setSelectedRecipe(null)}
+          onRate={r => { updateRating(selectedRecipe.id, r); setSelectedRecipe(prev => ({ ...prev, rating: r })); }}
+          onMarkCooked={() => { markCooked(selectedRecipe.id); setSelectedRecipe(prev => ({ ...prev, timesCooked: (prev.timesCooked || 0) + 1 })); }}
+        />
+      )}
+
       {/* Content */}
       <main style={{ maxWidth: 1200, margin: "0 auto", padding: "28px 24px" }}>
 
@@ -430,8 +898,8 @@ export default function MealPlannerApp() {
                         })}
 
                         {MEALS.map(meal => (
-                          <>
-                            <div key={meal} style={{
+                          <React.Fragment key={meal}>
+                            <div style={{
                               display: "flex", alignItems: "center", justifyContent: "flex-end",
                               paddingRight: 10, paddingTop: 6
                             }}>
@@ -442,23 +910,14 @@ export default function MealPlannerApp() {
                             {DAYS.map(day => {
                               const recipeId = plan[day][meal];
                               const recipe = recipeId ? getRecipe(recipeId, recipes) : null;
-                              const isOver = dragOver === `${day}-${meal}`;
                               return (
                                 <div
                                   key={`${day}-${meal}`}
                                   className="meal-slot"
-                                  onDragOver={e => { e.preventDefault(); setDragOver(`${day}-${meal}`); }}
-                                  onDragLeave={() => setDragOver(null)}
-                                  onDrop={e => {
-                                    e.preventDefault();
-                                    const id = e.dataTransfer.getData("recipeId");
-                                    if (id) addToPlan(day, meal, id);
-                                    setDragOver(null);
-                                  }}
                                   style={{
                                     minHeight: 70,
-                                    background: isOver ? "rgba(200,160,60,0.1)" : "#faf7f2",
-                                    border: `1.5px ${isOver ? "dashed" : "solid"} ${isOver ? "#c8a03c" : "#e8e0d4"}`,
+                                    background: "#faf7f2",
+                                    border: "1.5px solid #e8e0d4",
                                     borderRadius: 8,
                                     padding: 8,
                                     position: "relative",
@@ -481,15 +940,20 @@ export default function MealPlannerApp() {
                                       >×</button>
                                     </div>
                                   ) : (
-                                    <div style={{
-                                      height: "100%", display: "flex", alignItems: "center", justifyContent: "center",
-                                      color: "#c0b8ac", fontSize: 18
-                                    }}>+</div>
+                                    <div
+                                      onClick={() => { setPickerTarget({ day, meal }); setPickerSearch(""); }}
+                                      style={{
+                                        height: "100%", minHeight: 54,
+                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                        color: "#c0b8ac", fontSize: 18,
+                                        cursor: "pointer",
+                                      }}
+                                    >+</div>
                                   )}
                                 </div>
                               );
                             })}
-                          </>
+                          </React.Fragment>
                         ))}
                       </div>
                     </div>
@@ -499,7 +963,7 @@ export default function MealPlannerApp() {
                       borderRadius: 10, padding: "12px 18px", fontSize: 12, color: "#8a7f72",
                       display: "flex", alignItems: "center", gap: 8
                     }}>
-                      💡 <strong style={{ color: "#1c1915" }}>Tip:</strong> Drag recipes from the Recipe Library onto any meal slot, or click × to remove.
+                      💡 <strong style={{ color: "#1c1915" }}>Tip:</strong> Click any empty meal slot to pick a recipe. Click × on a filled slot to remove it.
                     </div>
                   </div>
                 )}
@@ -519,20 +983,13 @@ export default function MealPlannerApp() {
                         <div
                           key={recipe.id}
                           className="recipe-card"
-                          draggable
-                          onDragStart={e => {
-                            e.dataTransfer.setData("recipeId", recipe.id);
-                            setDragging(recipe.id);
-                          }}
-                          onDragEnd={() => setDragging(null)}
-                          onClick={() => setSelectedRecipe(selectedRecipe?.id === recipe.id ? null : recipe)}
+                          onClick={() => setSelectedRecipe(recipe)}
                           style={{
                             background: "#faf7f2",
-                            border: `1.5px solid ${selectedRecipe?.id === recipe.id ? "#c8a03c" : "#e8e0d4"}`,
+                            border: "1.5px solid #e8e0d4",
                             borderRadius: 12,
                             overflow: "hidden",
                             boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
-                            opacity: dragging === recipe.id ? 0.5 : 1,
                           }}
                         >
                           <div style={{
@@ -590,17 +1047,8 @@ export default function MealPlannerApp() {
                               </div>
                             )}
 
-                            {selectedRecipe?.id === recipe.id && recipe.ingredients?.length > 0 && (
-                              <div style={{ borderTop: "1px solid #e8e0d4", paddingTop: 12, marginTop: 4 }}>
-                                <div style={{ fontSize: 11, fontWeight: 500, color: "#1c1915", marginBottom: 6 }}>Ingredients</div>
-                                <ul style={{ margin: 0, padding: "0 0 0 16px", fontSize: 11, color: "#5a544c", lineHeight: 1.8 }}>
-                                  {recipe.ingredients.map(ing => <li key={ing}>{ing}</li>)}
-                                </ul>
-                              </div>
-                            )}
-
                             <div style={{ fontSize: 10, color: "#c0b8ac", marginTop: 8, fontStyle: "italic" }}>
-                              Drag onto the planner to schedule
+                              Click to view recipe
                             </div>
                           </div>
                         </div>
