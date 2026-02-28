@@ -80,6 +80,25 @@ function recipeEmoji(id) {
   return RECIPE_EMOJIS[code % RECIPE_EMOJIS.length];
 }
 
+// ─── Week Helpers ─────────────────────────────────────────────────────────────
+
+function getMondayOfWeek(offset) {
+  const today = new Date();
+  const dow = today.getDay(); // 0=Sun, 1=Mon, …
+  const daysToMon = dow === 0 ? -6 : 1 - dow;
+  const d = new Date(today);
+  d.setDate(today.getDate() + daysToMon + offset * 7);
+  return d;
+}
+
+function getWeekLabel(offset) {
+  if (offset === 0) return "This Week";
+  if (offset === -1) return "Last Week";
+  if (offset === 1) return "Next Week";
+  const mon = getMondayOfWeek(offset);
+  return `Week of ${mon.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+}
+
 // ─── Google Drive API ─────────────────────────────────────────────────────────
 
 async function fetchRecipesFromDrive(token) {
@@ -625,16 +644,23 @@ function RecipePicker({ recipes, target, search, onSearchChange, onSelect, onClo
 export default function MealPlannerApp() {
   const [activeTab, setActiveTab] = useState("planner");
   const [recipes, setRecipes] = useState([]);
-  const [plan, setPlan] = useState(EMPTY_PLAN);
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [plans, setPlans] = useState({}); // { [weekOffset]: plan }
   const [checkedItems, setCheckedItems] = useState({});
   const [selectedRecipe, setSelectedRecipe] = useState(null);
   const [pickerTarget, setPickerTarget] = useState(null); // { day, meal } | null
   const [pickerSearch, setPickerSearch] = useState("");
+  const [calorieGoal, setCalorieGoal] = useState(CALORIE_GOAL);
+  const [editingGoal, setEditingGoal] = useState(false);
+  const [recipeSearch, setRecipeSearch] = useState("");
+  const [recipeSort, setRecipeSort] = useState("default");
 
   // Auth state
   const [token, setToken] = useState(null);
   const [loadingRecipes, setLoadingRecipes] = useState(false);
   const [driveError, setDriveError] = useState(null);
+
+  const plan = plans[weekOffset] ?? EMPTY_PLAN;
 
   const shoppingList = generateShoppingList(plan, recipes);
   const totalWeekCalories = Object.keys(plan).reduce((sum, day) => sum + getDayCalories(plan[day], recipes), 0);
@@ -655,17 +681,40 @@ export default function MealPlannerApp() {
     }
   }, []);
 
+  // Persist state to localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("mealPlannerState");
+      if (saved) {
+        const data = JSON.parse(saved);
+        if (data.plans) setPlans(data.plans);
+        if (data.checkedItems) setCheckedItems(data.checkedItems);
+        if (data.calorieGoal) setCalorieGoal(data.calorieGoal);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("mealPlannerState", JSON.stringify({ plans, checkedItems, calorieGoal }));
+  }, [plans, checkedItems, calorieGoal]);
+
   function handleSignIn(accessToken) {
     setToken(accessToken);
     loadRecipes(accessToken);
   }
 
   function removeFromPlan(day, meal) {
-    setPlan(p => ({ ...p, [day]: { ...p[day], [meal]: null } }));
+    setPlans(prev => {
+      const cur = prev[weekOffset] ?? EMPTY_PLAN;
+      return { ...prev, [weekOffset]: { ...cur, [day]: { ...cur[day], [meal]: null } } };
+    });
   }
 
   function addToPlan(day, meal, recipeId) {
-    setPlan(p => ({ ...p, [day]: { ...p[day], [meal]: recipeId } }));
+    setPlans(prev => {
+      const cur = prev[weekOffset] ?? EMPTY_PLAN;
+      return { ...prev, [weekOffset]: { ...cur, [day]: { ...cur[day], [meal]: recipeId } } };
+    });
   }
 
   function updateRating(id, rating) {
@@ -767,17 +816,36 @@ export default function MealPlannerApp() {
         </nav>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{
-            background: "rgba(200,160,60,0.12)",
-            border: "1px solid rgba(200,160,60,0.3)",
-            borderRadius: 20,
-            padding: "6px 14px",
-            fontSize: 12,
-            color: "#c8a03c",
-            fontWeight: 500
-          }}>
-            Goal: {CALORIE_GOAL} cal/day
-          </div>
+          {editingGoal ? (
+            <input
+              autoFocus
+              type="number"
+              value={calorieGoal}
+              onChange={e => setCalorieGoal(Math.max(1, Number(e.target.value)))}
+              onBlur={() => setEditingGoal(false)}
+              onKeyDown={e => { if (e.key === "Enter" || e.key === "Escape") setEditingGoal(false); }}
+              style={{
+                width: 110, background: "rgba(200,160,60,0.12)",
+                border: "1px solid rgba(200,160,60,0.5)", borderRadius: 20,
+                padding: "5px 12px", fontSize: 12, color: "#c8a03c",
+                fontWeight: 500, fontFamily: "'DM Sans', sans-serif", outline: "none",
+              }}
+            />
+          ) : (
+            <div
+              onClick={() => setEditingGoal(true)}
+              title="Click to edit calorie goal"
+              style={{
+                background: "rgba(200,160,60,0.12)",
+                border: "1px solid rgba(200,160,60,0.3)",
+                borderRadius: 20, padding: "6px 14px",
+                fontSize: 12, color: "#c8a03c", fontWeight: 500,
+                cursor: "pointer", userSelect: "none",
+              }}
+            >
+              Goal: {calorieGoal.toLocaleString()} cal/day ✎
+            </div>
+          )}
           {token && (
             <button
               onClick={() => loadRecipes(token)}
@@ -865,10 +933,43 @@ export default function MealPlannerApp() {
                 {/* ── WEEK PLANNER ── */}
                 {activeTab === "planner" && (
                   <div className="fade-in">
-                    <div style={{ marginBottom: 24, display: "flex", alignItems: "baseline", gap: 12 }}>
-                      <h1 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 36, fontWeight: 600, margin: 0 }}>
-                        This Week
-                      </h1>
+                    <div style={{ marginBottom: 24, display: "flex", alignItems: "center", gap: 16 }}>
+                      <button
+                        onClick={() => setWeekOffset(w => w - 1)}
+                        style={{
+                          background: "#faf7f2", border: "1.5px solid #e8e0d4", borderRadius: 8,
+                          width: 36, height: 36, cursor: "pointer", fontSize: 16, color: "#8a7f72",
+                          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                        }}
+                      >←</button>
+                      <div>
+                        <h1 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 36, fontWeight: 600, margin: 0, lineHeight: 1 }}>
+                          {getWeekLabel(weekOffset)}
+                        </h1>
+                        <div style={{ fontSize: 12, color: "#8a7f72", marginTop: 4 }}>
+                          {getMondayOfWeek(weekOffset).toLocaleDateString("en-US", { month: "long", day: "numeric" })}
+                          {" – "}
+                          {new Date(getMondayOfWeek(weekOffset).getTime() + 6 * 86400000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setWeekOffset(w => w + 1)}
+                        style={{
+                          background: "#faf7f2", border: "1.5px solid #e8e0d4", borderRadius: 8,
+                          width: 36, height: 36, cursor: "pointer", fontSize: 16, color: "#8a7f72",
+                          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                        }}
+                      >→</button>
+                      {weekOffset !== 0 && (
+                        <button
+                          onClick={() => setWeekOffset(0)}
+                          style={{
+                            background: "none", border: "1px solid #d4c9b8", borderRadius: 8,
+                            padding: "6px 14px", fontSize: 12, color: "#8a7f72", cursor: "pointer",
+                            fontFamily: "'DM Sans', sans-serif",
+                          }}
+                        >Today</button>
+                      )}
                     </div>
 
                     <div style={{ overflowX: "auto", paddingBottom: 8 }}>
@@ -876,8 +977,8 @@ export default function MealPlannerApp() {
                         <div />
                         {DAYS.map(day => {
                           const cals = getDayCalories(plan[day], recipes);
-                          const pct = Math.min((cals / CALORIE_GOAL) * 100, 100);
-                          const over = cals > CALORIE_GOAL;
+                          const pct = Math.min((cals / calorieGoal) * 100, 100);
+                          const over = cals > calorieGoal;
                           return (
                             <div key={day} style={{ textAlign: "center", paddingBottom: 8 }}>
                               <div style={{ fontSize: 11, fontWeight: 500, color: "#8a7f72", letterSpacing: "0.06em", textTransform: "uppercase" }}>
@@ -924,14 +1025,17 @@ export default function MealPlannerApp() {
                                   }}
                                 >
                                   {recipe ? (
-                                    <div>
+                                    <div
+                                      onClick={() => setSelectedRecipe(recipe)}
+                                      style={{ cursor: "pointer", height: "100%" }}
+                                    >
                                       <div style={{ fontSize: 18, marginBottom: 3 }}>{recipeEmoji(recipe.id)}</div>
                                       <div style={{ fontSize: 11, fontWeight: 500, lineHeight: 1.3, color: "#1c1915", marginBottom: 3 }}>
                                         {recipe.title.length > 28 ? recipe.title.slice(0, 28) + "…" : recipe.title}
                                       </div>
                                       <div style={{ fontSize: 10, color: "#8a7f72" }}>{recipe.caloriesPerServing} cal</div>
                                       <button
-                                        onClick={() => removeFromPlan(day, meal)}
+                                        onClick={e => { e.stopPropagation(); removeFromPlan(day, meal); }}
                                         style={{
                                           position: "absolute", top: 5, right: 5,
                                           background: "none", border: "none", cursor: "pointer",
@@ -969,17 +1073,71 @@ export default function MealPlannerApp() {
                 )}
 
                 {/* ── RECIPES ── */}
-                {activeTab === "recipes" && (
+                {activeTab === "recipes" && (() => {
+                  const sortedFiltered = recipes
+                    .filter(r => r.title.toLowerCase().includes(recipeSearch.toLowerCase()))
+                    .sort((a, b) => {
+                      if (recipeSort === "rating") return (b.rating || 0) - (a.rating || 0);
+                      if (recipeSort === "cooked") return (b.timesCooked || 0) - (a.timesCooked || 0);
+                      if (recipeSort === "az") return a.title.localeCompare(b.title);
+                      return 0;
+                    });
+                  return (
                   <div className="fade-in">
-                    <div style={{ marginBottom: 24, display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+                    <div style={{ marginBottom: 16, display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
                       <h1 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 36, fontWeight: 600, margin: 0 }}>
                         Recipe Library
                       </h1>
-                      <span style={{ color: "#8a7f72", fontSize: 13 }}>{recipes.length} recipes saved</span>
+                      <span style={{ color: "#8a7f72", fontSize: 13 }}>
+                        {sortedFiltered.length === recipes.length ? `${recipes.length} recipes` : `${sortedFiltered.length} of ${recipes.length}`}
+                      </span>
                     </div>
 
+                    {/* Search + sort bar */}
+                    <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
+                      <div style={{ position: "relative", flex: 1 }}>
+                        <span style={{
+                          position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)",
+                          fontSize: 14, color: "#c0b8ac", pointerEvents: "none",
+                        }}>🔍</span>
+                        <input
+                          type="text"
+                          placeholder="Search recipes…"
+                          value={recipeSearch}
+                          onChange={e => setRecipeSearch(e.target.value)}
+                          style={{
+                            width: "100%", border: "1.5px solid #e8e0d4", borderRadius: 10,
+                            padding: "9px 14px 9px 36px", fontSize: 13,
+                            fontFamily: "'DM Sans', sans-serif", color: "#1c1915",
+                            background: "#fff", outline: "none",
+                          }}
+                        />
+                      </div>
+                      <select
+                        value={recipeSort}
+                        onChange={e => setRecipeSort(e.target.value)}
+                        style={{
+                          border: "1.5px solid #e8e0d4", borderRadius: 10,
+                          padding: "9px 14px", fontSize: 13,
+                          fontFamily: "'DM Sans', sans-serif", color: "#1c1915",
+                          background: "#fff", cursor: "pointer", outline: "none",
+                        }}
+                      >
+                        <option value="default">Default</option>
+                        <option value="rating">Top Rated</option>
+                        <option value="cooked">Most Cooked</option>
+                        <option value="az">A → Z</option>
+                      </select>
+                    </div>
+
+                    {sortedFiltered.length === 0 && (
+                      <div style={{ color: "#8a7f72", fontSize: 14, textAlign: "center", paddingTop: 60 }}>
+                        No recipes match "{recipeSearch}"
+                      </div>
+                    )}
+
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
-                      {recipes.map(recipe => (
+                      {sortedFiltered.map(recipe => (
                         <div
                           key={recipe.id}
                           className="recipe-card"
@@ -1055,7 +1213,8 @@ export default function MealPlannerApp() {
                       ))}
                     </div>
                   </div>
-                )}
+                  );
+                })()}
 
                 {/* ── SHOPPING LIST ── */}
                 {activeTab === "shopping" && (
@@ -1143,9 +1302,9 @@ export default function MealPlannerApp() {
 
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 28, maxWidth: 600 }}>
                       {[
-                        { label: "Daily Goal", value: CALORIE_GOAL, unit: "cal", color: "#c8a03c" },
-                        { label: "Avg This Week", value: avgDailyCalories, unit: "cal", color: avgDailyCalories > CALORIE_GOAL ? "#c94040" : "#4a7c59" },
-                        { label: "Deficit / Day", value: Math.abs(CALORIE_GOAL - avgDailyCalories), unit: `cal ${CALORIE_GOAL > avgDailyCalories ? "under" : "over"}`, color: CALORIE_GOAL > avgDailyCalories ? "#4a7c59" : "#c94040" },
+                        { label: "Daily Goal", value: calorieGoal, unit: "cal", color: "#c8a03c" },
+                        { label: "Avg This Week", value: avgDailyCalories, unit: "cal", color: avgDailyCalories > calorieGoal ? "#c94040" : "#4a7c59" },
+                        { label: "Deficit / Day", value: Math.abs(calorieGoal - avgDailyCalories), unit: `cal ${calorieGoal > avgDailyCalories ? "under" : "over"}`, color: calorieGoal > avgDailyCalories ? "#4a7c59" : "#c94040" },
                       ].map(card => (
                         <div key={card.label} style={{
                           background: "#faf7f2", border: "1.5px solid #e8e0d4",
@@ -1168,8 +1327,8 @@ export default function MealPlannerApp() {
                       </div>
                       {DAYS.map(day => {
                         const cals = getDayCalories(plan[day], recipes);
-                        const pct = Math.min((cals / CALORIE_GOAL) * 100, 100);
-                        const over = cals > CALORIE_GOAL;
+                        const pct = Math.min((cals / calorieGoal) * 100, 100);
+                        const over = cals > calorieGoal;
                         const meals = Object.entries(plan[day])
                           .filter(([, id]) => id)
                           .map(([meal, id]) => `${meal}: ${getRecipe(id, recipes)?.title}`)
