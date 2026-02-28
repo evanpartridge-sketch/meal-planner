@@ -441,6 +441,185 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked }) {
   );
 }
 
+// ─── Recipe Picker Modal ──────────────────────────────────────────────────────
+
+function RecipePicker({ recipes, target, search, onSearchChange, onSelect, onClose }) {
+  useEffect(() => {
+    function handleKey(e) { if (e.key === "Escape") onClose(); }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  const filtered = recipes.filter(r =>
+    r.title.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0,
+        background: "rgba(0,0,0,0.45)",
+        zIndex: 200,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "#faf7f2",
+          borderRadius: 16,
+          width: "90%",
+          maxWidth: 560,
+          maxHeight: "70vh",
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: "0 24px 64px rgba(0,0,0,0.3)",
+          overflow: "hidden",
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          padding: "20px 20px 0",
+          borderBottom: "1px solid #e8e0d4",
+          paddingBottom: 16,
+          flexShrink: 0,
+        }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 4 }}>
+            <div>
+              <div style={{
+                fontFamily: "'Cormorant Garamond', serif",
+                fontSize: 22,
+                fontWeight: 700,
+                color: "#1c1915",
+                lineHeight: 1.2,
+              }}>Pick a Recipe</div>
+              {target && (
+                <div style={{ fontSize: 13, color: "#8a7f72", marginTop: 3 }}>
+                  For {target.day} · {target.meal}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={onClose}
+              style={{
+                background: "rgba(0,0,0,0.06)",
+                border: "none",
+                borderRadius: 20,
+                width: 32, height: 32,
+                cursor: "pointer",
+                fontSize: 18,
+                color: "#8a7f72",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0,
+                marginLeft: 12,
+              }}
+            >×</button>
+          </div>
+
+          {/* Search */}
+          <div style={{ position: "relative", marginTop: 14 }}>
+            <span style={{
+              position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)",
+              fontSize: 14, color: "#c0b8ac", pointerEvents: "none",
+            }}>🔍</span>
+            <input
+              autoFocus
+              type="text"
+              placeholder="Search recipes..."
+              value={search}
+              onChange={e => onSearchChange(e.target.value)}
+              style={{
+                width: "100%",
+                border: "1.5px solid #e8e0d4",
+                borderRadius: 10,
+                padding: "10px 14px 10px 36px",
+                fontSize: 13,
+                fontFamily: "'DM Sans', sans-serif",
+                color: "#1c1915",
+                background: "#fff",
+                outline: "none",
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Scrollable recipe grid */}
+        <div style={{ overflowY: "auto", flex: 1, padding: 16 }}>
+          {filtered.length === 0 ? (
+            <div style={{
+              textAlign: "center", padding: "40px 0",
+              color: "#8a7f72", fontSize: 14,
+            }}>
+              No recipes match "{search}"
+            </div>
+          ) : (
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+              gap: 12,
+            }}>
+              {filtered.map(recipe => (
+                <div
+                  key={recipe.id}
+                  onClick={() => onSelect(recipe)}
+                  className="picker-card"
+                  style={{
+                    background: "#fff",
+                    border: "1.5px solid #e8e0d4",
+                    borderRadius: 10,
+                    overflow: "hidden",
+                    cursor: "pointer",
+                  }}
+                >
+                  {/* Thumbnail */}
+                  {recipe.image ? (
+                    <img
+                      src={recipe.image}
+                      alt={recipe.title}
+                      style={{ width: "100%", height: 80, objectFit: "cover", display: "block" }}
+                    />
+                  ) : (
+                    <div style={{
+                      height: 80,
+                      background: "linear-gradient(135deg, #2a2420 0%, #3d3128 100%)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 28,
+                    }}>
+                      {recipeEmoji(recipe.id)}
+                    </div>
+                  )}
+                  {/* Title */}
+                  <div style={{
+                    padding: "8px 10px 4px",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "#1c1915",
+                    lineHeight: 1.35,
+                    display: "-webkit-box",
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: "vertical",
+                    overflow: "hidden",
+                  }}>
+                    {recipe.title}
+                  </div>
+                  {/* Time */}
+                  {recipe.times?.["total time"] && (
+                    <div style={{ padding: "0 10px 8px", fontSize: 10, color: "#8a7f72" }}>
+                      ⏱ {recipe.times["total time"]}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 export default function MealPlannerApp() {
@@ -449,8 +628,8 @@ export default function MealPlannerApp() {
   const [plan, setPlan] = useState(EMPTY_PLAN);
   const [checkedItems, setCheckedItems] = useState({});
   const [selectedRecipe, setSelectedRecipe] = useState(null);
-  const [dragOver, setDragOver] = useState(null);
-  const [dragging, setDragging] = useState(null);
+  const [pickerTarget, setPickerTarget] = useState(null); // { day, meal } | null
+  const [pickerSearch, setPickerSearch] = useState("");
 
   // Auth state
   const [token, setToken] = useState(null);
@@ -521,8 +700,10 @@ export default function MealPlannerApp() {
         .tab-btn:hover { background: rgba(200,160,60,0.12) !important; }
         .recipe-card { transition: transform 0.15s, box-shadow 0.15s; cursor: pointer; }
         .recipe-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.1) !important; }
-        .meal-slot { transition: background 0.15s, border-color 0.15s; }
+        .meal-slot { transition: background 0.15s, border-color 0.15s; cursor: pointer; }
         .meal-slot:hover { background: rgba(200,160,60,0.06) !important; }
+        .picker-card { transition: border-color 0.12s, background 0.12s; }
+        .picker-card:hover { border-color: #c8a03c !important; background: #fffbf0 !important; }
         .check-item { transition: opacity 0.2s; }
         .check-item.checked { opacity: 0.45; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
@@ -610,6 +791,22 @@ export default function MealPlannerApp() {
           )}
         </div>
       </header>
+
+      {/* Recipe Picker Modal */}
+      {pickerTarget && (
+        <RecipePicker
+          recipes={recipes}
+          target={pickerTarget}
+          search={pickerSearch}
+          onSearchChange={setPickerSearch}
+          onSelect={recipe => {
+            addToPlan(pickerTarget.day, pickerTarget.meal, recipe.id);
+            setPickerTarget(null);
+            setPickerSearch("");
+          }}
+          onClose={() => { setPickerTarget(null); setPickerSearch(""); }}
+        />
+      )}
 
       {/* Recipe Detail Modal */}
       {selectedRecipe && (
@@ -713,23 +910,14 @@ export default function MealPlannerApp() {
                             {DAYS.map(day => {
                               const recipeId = plan[day][meal];
                               const recipe = recipeId ? getRecipe(recipeId, recipes) : null;
-                              const isOver = dragOver === `${day}-${meal}`;
                               return (
                                 <div
                                   key={`${day}-${meal}`}
                                   className="meal-slot"
-                                  onDragOver={e => { e.preventDefault(); setDragOver(`${day}-${meal}`); }}
-                                  onDragLeave={() => setDragOver(null)}
-                                  onDrop={e => {
-                                    e.preventDefault();
-                                    const id = e.dataTransfer.getData("recipeId");
-                                    if (id) addToPlan(day, meal, id);
-                                    setDragOver(null);
-                                  }}
                                   style={{
                                     minHeight: 70,
-                                    background: isOver ? "rgba(200,160,60,0.1)" : "#faf7f2",
-                                    border: `1.5px ${isOver ? "dashed" : "solid"} ${isOver ? "#c8a03c" : "#e8e0d4"}`,
+                                    background: "#faf7f2",
+                                    border: "1.5px solid #e8e0d4",
                                     borderRadius: 8,
                                     padding: 8,
                                     position: "relative",
@@ -752,10 +940,15 @@ export default function MealPlannerApp() {
                                       >×</button>
                                     </div>
                                   ) : (
-                                    <div style={{
-                                      height: "100%", display: "flex", alignItems: "center", justifyContent: "center",
-                                      color: "#c0b8ac", fontSize: 18
-                                    }}>+</div>
+                                    <div
+                                      onClick={() => { setPickerTarget({ day, meal }); setPickerSearch(""); }}
+                                      style={{
+                                        height: "100%", minHeight: 54,
+                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                        color: "#c0b8ac", fontSize: 18,
+                                        cursor: "pointer",
+                                      }}
+                                    >+</div>
                                   )}
                                 </div>
                               );
@@ -770,7 +963,7 @@ export default function MealPlannerApp() {
                       borderRadius: 10, padding: "12px 18px", fontSize: 12, color: "#8a7f72",
                       display: "flex", alignItems: "center", gap: 8
                     }}>
-                      💡 <strong style={{ color: "#1c1915" }}>Tip:</strong> Drag recipes from the Recipe Library onto any meal slot, or click × to remove.
+                      💡 <strong style={{ color: "#1c1915" }}>Tip:</strong> Click any empty meal slot to pick a recipe. Click × on a filled slot to remove it.
                     </div>
                   </div>
                 )}
@@ -790,12 +983,6 @@ export default function MealPlannerApp() {
                         <div
                           key={recipe.id}
                           className="recipe-card"
-                          draggable
-                          onDragStart={e => {
-                            e.dataTransfer.setData("recipeId", recipe.id);
-                            setDragging(recipe.id);
-                          }}
-                          onDragEnd={() => setDragging(null)}
                           onClick={() => setSelectedRecipe(recipe)}
                           style={{
                             background: "#faf7f2",
@@ -803,7 +990,6 @@ export default function MealPlannerApp() {
                             borderRadius: 12,
                             overflow: "hidden",
                             boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
-                            opacity: dragging === recipe.id ? 0.5 : 1,
                           }}
                         >
                           <div style={{
@@ -862,7 +1048,7 @@ export default function MealPlannerApp() {
                             )}
 
                             <div style={{ fontSize: 10, color: "#c0b8ac", marginTop: 8, fontStyle: "italic" }}>
-                              Click to view · Drag to plan
+                              Click to view recipe
                             </div>
                           </div>
                         </div>
