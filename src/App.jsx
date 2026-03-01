@@ -211,14 +211,73 @@ function SignInScreen({ onSignIn }) {
   );
 }
 
+// ─── Serving Scaler Helpers ───────────────────────────────────────────────────
+
+function parseServings(yieldText) {
+  if (!yieldText) return 4;
+  const match = yieldText.match(/\d+/);
+  return match ? parseInt(match[0], 10) : 4;
+}
+
+function formatAmount(n) {
+  if (n <= 0) return "0";
+  const whole = Math.floor(n);
+  const frac = n - whole;
+  const fracs = [
+    [1/8,"⅛"],[1/4,"¼"],[1/3,"⅓"],[3/8,"⅜"],[1/2,"½"],
+    [5/8,"⅝"],[2/3,"⅔"],[3/4,"¾"],[7/8,"⅞"],
+  ];
+  for (const [val, sym] of fracs) {
+    if (Math.abs(frac - val) < 0.06) return whole > 0 ? `${whole}${sym}` : sym;
+  }
+  if (frac < 0.06) return String(whole);
+  return String(Math.round(n * 4) / 4);
+}
+
+function scaleIngredient(ing, ratio) {
+  if (Math.abs(ratio - 1) < 0.001) return ing;
+  const unicodeMap = {"½":.5,"⅓":1/3,"⅔":2/3,"¼":.25,"¾":.75,"⅛":.125,"⅜":.375,"⅝":.625,"⅞":.875};
+  const pattern = /^(\d+\s+\d+\/\d+|\d+\/\d+|\d+[½⅓⅔¼¾⅛⅜⅝⅞]|[½⅓⅔¼¾⅛⅜⅝⅞]|\d+\.?\d*)/;
+  const match = ing.match(pattern);
+  if (!match) return ing;
+  const raw = match[1];
+  let num;
+  if (/^\d+\s+\d+\/\d+$/.test(raw)) {
+    const [w, f] = raw.split(/\s+/);
+    const [n, d] = f.split("/");
+    num = parseInt(w) + parseInt(n) / parseInt(d);
+  } else if (/^\d+\/\d+$/.test(raw)) {
+    const [n, d] = raw.split("/");
+    num = parseInt(n) / parseInt(d);
+  } else {
+    const uniMatch = raw.match(/^(\d*)([½⅓⅔¼¾⅛⅜⅝⅞]?)$/);
+    const intPart = uniMatch && uniMatch[1] ? parseInt(uniMatch[1]) : 0;
+    const uniPart = uniMatch && uniMatch[2] ? (unicodeMap[uniMatch[2]] || 0) : 0;
+    num = intPart + uniPart;
+  }
+  if (!num) return ing;
+  return ing.replace(raw, formatAmount(num * ratio));
+}
+
 // ─── Recipe Detail Modal ──────────────────────────────────────────────────────
 
-function RecipeDetail({ recipe, onClose, onRate, onMarkCooked }) {
+function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalories }) {
   useEffect(() => {
     function handleKey(e) { if (e.key === "Escape") onClose(); }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [onClose]);
+
+  const origServings = parseServings(recipe.yield);
+  const [servingCount, setServingCount] = useState(origServings);
+  const [isEstimating, setIsEstimating] = useState(false);
+  const ratio = origServings > 0 ? servingCount / origServings : 1;
+
+  async function handleEstimate() {
+    setIsEstimating(true);
+    try { await onEstimateCalories(recipe); }
+    finally { setIsEstimating(false); }
+  }
 
   const timeEntries = Object.entries(recipe.times || {}).filter(([, v]) => v);
 
@@ -318,7 +377,7 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked }) {
           </div>
 
           {/* Stats row */}
-          {(timeEntries.length > 0 || recipe.yield || recipe.caloriesPerServing) && (
+          {(timeEntries.length > 0 || recipe.yield || recipe.caloriesPerServing || onEstimateCalories) && (
             <>
               <div style={{ height: 1, background: "#e8e0d4", margin: "0 0 20px" }} />
               <div style={{ display: "flex", gap: 32, flexWrap: "wrap", marginBottom: 20 }}>
@@ -333,19 +392,34 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked }) {
                 {recipe.yield && (
                   <div>
                     <div style={{ fontSize: 10, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 500, marginBottom: 3 }}>
-                      Yield
+                      Servings
                     </div>
-                    <div style={{ fontSize: 15, color: "#1c1915", fontWeight: 500 }}>{recipe.yield}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <button onClick={() => setServingCount(s => Math.max(1, s - 1))} style={{ width: 22, height: 22, borderRadius: "50%", border: "1px solid #d4c9b8", background: "#fff", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#8a7f72", padding: 0 }}>−</button>
+                      <span style={{ fontSize: 15, color: "#1c1915", fontWeight: 500, minWidth: 24, textAlign: "center" }}>{servingCount}</span>
+                      <button onClick={() => setServingCount(s => s + 1)} style={{ width: 22, height: 22, borderRadius: "50%", border: "1px solid #d4c9b8", background: "#fff", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#8a7f72", padding: 0 }}>+</button>
+                    </div>
                   </div>
                 )}
-                {recipe.caloriesPerServing && (
-                  <div>
-                    <div style={{ fontSize: 10, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 500, marginBottom: 3 }}>
-                      Calories
-                    </div>
-                    <div style={{ fontSize: 15, color: "#1c1915", fontWeight: 500 }}>{recipe.caloriesPerServing} / serving</div>
+                <div>
+                  <div style={{ fontSize: 10, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 500, marginBottom: 3 }}>
+                    Calories
                   </div>
-                )}
+                  {recipe.caloriesPerServing ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 15, color: "#1c1915", fontWeight: 500 }}>{recipe.caloriesPerServing} / serving</span>
+                      {onEstimateCalories && (
+                        <button onClick={handleEstimate} disabled={isEstimating} style={{ fontSize: 10, color: "#8a7f72", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline", fontFamily: "'DM Sans', sans-serif" }}>
+                          {isEstimating ? "…" : "re-estimate"}
+                        </button>
+                      )}
+                    </div>
+                  ) : onEstimateCalories ? (
+                    <button onClick={handleEstimate} disabled={isEstimating} style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "1px solid #d4c9b8", borderRadius: 6, padding: "4px 10px", cursor: isEstimating ? "default" : "pointer", fontSize: 12, color: "#8a7f72", fontFamily: "'DM Sans', sans-serif", opacity: isEstimating ? 0.6 : 1 }}>
+                      {isEstimating ? "Estimating…" : "✨ Estimate with AI"}
+                    </button>
+                  ) : null}
+                </div>
               </div>
             </>
           )}
@@ -390,7 +464,7 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked }) {
                         padding: "7px 0",
                         borderBottom: "1px solid #f0ebe2",
                       }}>
-                        {ing.replace(/(\d)([a-zA-Z])/g, "$1 $2")}
+                        {scaleIngredient(ing, ratio).replace(/(\d)([a-zA-Z])/g, "$1 $2")}
                       </div>
                     ))}
                   </div>
@@ -659,6 +733,7 @@ export default function MealPlannerApp() {
   const [token, setToken] = useState(null);
   const [loadingRecipes, setLoadingRecipes] = useState(false);
   const [driveError, setDriveError] = useState(null);
+  const [lastSyncTime, setLastSyncTime] = useState(null);
 
   const plan = plans[weekOffset] ?? EMPTY_PLAN;
 
@@ -681,8 +756,15 @@ export default function MealPlannerApp() {
     }
   }, []);
 
-  // Persist state to localStorage
+  // Load GIS script + cached data on mount
   useEffect(() => {
+    if (!document.getElementById("google-gsi")) {
+      const script = document.createElement("script");
+      script.id = "google-gsi";
+      script.src = "https://accounts.google.com/gsi/client";
+      script.async = true;
+      document.head.appendChild(script);
+    }
     try {
       const saved = localStorage.getItem("mealPlannerState");
       if (saved) {
@@ -691,6 +773,10 @@ export default function MealPlannerApp() {
         if (data.checkedItems) setCheckedItems(data.checkedItems);
         if (data.calorieGoal) setCalorieGoal(data.calorieGoal);
       }
+      const cachedRecipes = localStorage.getItem("mealplanner_recipes");
+      if (cachedRecipes) setRecipes(JSON.parse(cachedRecipes));
+      const lastSync = localStorage.getItem("mealplanner_last_sync");
+      if (lastSync) setLastSyncTime(lastSync);
     } catch {}
   }, []);
 
@@ -701,6 +787,65 @@ export default function MealPlannerApp() {
   function handleSignIn(accessToken) {
     setToken(accessToken);
     loadRecipes(accessToken);
+  }
+
+  function triggerOAuth(callback) {
+    const client = window.google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: "https://www.googleapis.com/auth/drive.readonly",
+      callback: (response) => {
+        if (response.access_token) {
+          setToken(response.access_token);
+          callback(response.access_token);
+        }
+      },
+    });
+    client.requestAccessToken();
+  }
+
+  async function doSync(accessToken) {
+    setLoadingRecipes(true);
+    setDriveError(null);
+    try {
+      const data = await fetchRecipesFromDrive(accessToken);
+      setRecipes(data);
+      localStorage.setItem("mealplanner_recipes", JSON.stringify(data));
+      const now = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      localStorage.setItem("mealplanner_last_sync", now);
+      setLastSyncTime(now);
+    } catch (err) {
+      setDriveError("Couldn't sync recipes from Drive. Please try again.");
+      console.error(err);
+    } finally {
+      setLoadingRecipes(false);
+    }
+  }
+
+  function syncFromDrive() {
+    if (token) { doSync(token); }
+    else { triggerOAuth((accessToken) => doSync(accessToken)); }
+  }
+
+  async function estimateCalories(recipe) {
+    try {
+      const res = await fetch("/api/estimate-calories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ingredients: recipe.ingredients, yield: recipe.yield }),
+      });
+      const data = await res.json();
+      if (data.caloriesPerServing) {
+        const updated = recipes.map(r =>
+          r.id === recipe.id ? { ...r, caloriesPerServing: data.caloriesPerServing } : r
+        );
+        setRecipes(updated);
+        localStorage.setItem("mealplanner_recipes", JSON.stringify(updated));
+        return data.caloriesPerServing;
+      }
+    } catch (err) {
+      console.error("Failed to estimate calories:", err);
+    }
+    return null;
   }
 
   function removeFromPlan(day, meal) {
@@ -846,17 +991,17 @@ export default function MealPlannerApp() {
               Goal: {calorieGoal.toLocaleString()} cal/day ✎
             </div>
           )}
-          {token && (
-            <button
-              onClick={() => loadRecipes(token)}
-              title="Refresh recipes from Drive"
-              style={{
-                background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
-                borderRadius: 8, padding: "6px 10px", cursor: "pointer",
-                color: "#8a7f72", fontSize: 14
-              }}
-            >↻</button>
-          )}
+          <button
+            onClick={syncFromDrive}
+            title="Sync recipes from Drive"
+            disabled={loadingRecipes}
+            style={{
+              background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 8, padding: "6px 10px", cursor: loadingRecipes ? "default" : "pointer",
+              color: loadingRecipes ? "#555" : "#8a7f72", fontSize: 14,
+              opacity: loadingRecipes ? 0.5 : 1,
+            }}
+          >↻</button>
         </div>
       </header>
 
@@ -883,37 +1028,38 @@ export default function MealPlannerApp() {
           onClose={() => setSelectedRecipe(null)}
           onRate={r => { updateRating(selectedRecipe.id, r); setSelectedRecipe(prev => ({ ...prev, rating: r })); }}
           onMarkCooked={() => { markCooked(selectedRecipe.id); setSelectedRecipe(prev => ({ ...prev, timesCooked: (prev.timesCooked || 0) + 1 })); }}
+          onEstimateCalories={async (recipe) => {
+            const cal = await estimateCalories(recipe);
+            if (cal) setSelectedRecipe(prev => ({ ...prev, caloriesPerServing: cal }));
+          }}
         />
       )}
 
       {/* Content */}
       <main style={{ maxWidth: 1200, margin: "0 auto", padding: "28px 24px" }}>
 
-        {/* Not signed in */}
-        {!token && <SignInScreen onSignIn={handleSignIn} />}
+        {/* Syncing from scratch */}
+        {loadingRecipes && recipes.length === 0 && <Spinner message="Syncing recipes from Google Drive…" />}
 
-        {/* Signed in — loading */}
-        {token && loadingRecipes && <Spinner />}
-
-        {/* Error state */}
-        {token && !loadingRecipes && driveError && (
+        {/* Error banner */}
+        {driveError && (
           <div style={{
             background: "#fff0f0", border: "1px solid #f5c0c0", borderRadius: 10,
             padding: "16px 20px", color: "#c94040", fontSize: 14, marginBottom: 20
           }}>
             {driveError}
-            <button onClick={() => loadRecipes(token)} style={{
+            <button onClick={syncFromDrive} style={{
               marginLeft: 12, background: "none", border: "1px solid #c94040",
               borderRadius: 6, padding: "4px 10px", cursor: "pointer", color: "#c94040", fontSize: 12
             }}>Retry</button>
           </div>
         )}
 
-        {/* Signed in — loaded */}
-        {token && !loadingRecipes && !driveError && (
+        {/* App content */}
+        {(!loadingRecipes || recipes.length > 0) && (
           <>
             {/* Empty state */}
-            {recipes.length === 0 && (
+            {recipes.length === 0 && !driveError && (
               <div style={{
                 display: "flex", flexDirection: "column", alignItems: "center",
                 justifyContent: "center", minHeight: 320, gap: 16, textAlign: "center"
@@ -923,8 +1069,19 @@ export default function MealPlannerApp() {
                   No recipes yet
                 </div>
                 <div style={{ fontSize: 14, color: "#8a7f72", maxWidth: 340, lineHeight: 1.6 }}>
-                  Use the Chrome extension to scrape recipes from NYT Cooking — they'll appear here automatically.
+                  Use the Chrome extension to save recipes from NYT Cooking, then sync from Drive.
                 </div>
+                <button
+                  onClick={syncFromDrive}
+                  style={{
+                    background: "#1c1915", color: "#f5f0e8", border: "none", borderRadius: 10,
+                    padding: "10px 22px", fontSize: 14, fontWeight: 500, cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 8, fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  <img src="https://www.google.com/favicon.ico" width={14} height={14} alt="" />
+                  Sync from Drive
+                </button>
               </div>
             )}
 
@@ -1084,13 +1241,32 @@ export default function MealPlannerApp() {
                     });
                   return (
                   <div className="fade-in">
-                    <div style={{ marginBottom: 16, display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-                      <h1 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 36, fontWeight: 600, margin: 0 }}>
-                        Recipe Library
-                      </h1>
-                      <span style={{ color: "#8a7f72", fontSize: 13 }}>
-                        {sortedFiltered.length === recipes.length ? `${recipes.length} recipes` : `${sortedFiltered.length} of ${recipes.length}`}
-                      </span>
+                    <div style={{ marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
+                        <h1 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 36, fontWeight: 600, margin: 0 }}>
+                          Recipe Library
+                        </h1>
+                        <span style={{ color: "#8a7f72", fontSize: 13 }}>
+                          {sortedFiltered.length === recipes.length ? `${recipes.length} recipes` : `${sortedFiltered.length} of ${recipes.length}`}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                        {lastSyncTime && <span style={{ fontSize: 11, color: "#c0b8ac" }}>Last synced: {lastSyncTime}</span>}
+                        <button
+                          onClick={syncFromDrive}
+                          disabled={loadingRecipes}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 6,
+                            background: "#fff", border: "1.5px solid #e8e0d4", borderRadius: 8,
+                            padding: "7px 14px", fontSize: 12, color: "#1c1915",
+                            cursor: loadingRecipes ? "default" : "pointer",
+                            fontFamily: "'DM Sans', sans-serif", opacity: loadingRecipes ? 0.6 : 1,
+                          }}
+                        >
+                          <img src="https://www.google.com/favicon.ico" width={12} height={12} alt="" />
+                          {loadingRecipes ? "Syncing…" : "Sync from Drive"}
+                        </button>
+                      </div>
                     </div>
 
                     {/* Search + sort bar */}
