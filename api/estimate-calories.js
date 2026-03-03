@@ -33,20 +33,23 @@ Respond with JSON only, no text outside the JSON object:
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
         max_tokens: 400,
-        messages: [{ role: "user", content: prompt }],
+        messages: [
+          { role: "user", content: prompt },
+          { role: "assistant", content: "{" },
+        ],
       }),
     });
 
     const data = await response.json();
-    const text = data.content?.[0]?.text?.trim();
+    const rawText = data.content?.[0]?.text?.trim();
 
     let calories, breakdown;
     try {
-      const parsed = JSON.parse(text);
+      const parsed = JSON.parse("{" + rawText);
       calories = parseInt(parsed.calories, 10);
       breakdown = parsed.breakdown || "";
     } catch {
-      calories = parseInt(text, 10);
+      calories = NaN;
       breakdown = "";
     }
 
