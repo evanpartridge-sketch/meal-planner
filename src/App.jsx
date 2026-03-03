@@ -271,6 +271,7 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
   const origServings = parseServings(recipe.yield);
   const [servingCount, setServingCount] = useState(origServings);
   const [isEstimating, setIsEstimating] = useState(false);
+  const [showCalTooltip, setShowCalTooltip] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
   const [draftIngredients, setDraftIngredients] = useState([]);
@@ -517,7 +518,25 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
                   </div>
                   {recipe.caloriesPerServing ? (
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontSize: 15, color: "#1c1915", fontWeight: 500 }}>{recipe.caloriesPerServing} / serving</span>
+                      <div style={{ position: "relative", display: "inline-block" }}
+                        onMouseEnter={() => recipe.calorieReasoning && setShowCalTooltip(true)}
+                        onMouseLeave={() => setShowCalTooltip(false)}
+                      >
+                        <span style={{ fontSize: 15, color: "#1c1915", fontWeight: 500, cursor: recipe.calorieReasoning ? "help" : "default" }}>{recipe.caloriesPerServing} / serving</span>
+                        {showCalTooltip && recipe.calorieReasoning && (
+                          <div style={{
+                            position: "absolute", bottom: "calc(100% + 8px)", left: 0,
+                            background: "#2c2820", color: "#f5f0e8",
+                            borderRadius: 8, padding: "10px 14px",
+                            fontSize: 12, lineHeight: 1.7,
+                            whiteSpace: "pre-line", width: 260,
+                            boxShadow: "0 4px 16px rgba(0,0,0,0.25)",
+                            zIndex: 10, pointerEvents: "none",
+                          }}>
+                            {recipe.calorieReasoning}
+                          </div>
+                        )}
+                      </div>
                       {onEstimateCalories && (
                         <button onClick={handleEstimate} disabled={isEstimating} style={{ fontSize: 10, color: "#8a7f72", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline", fontFamily: "'DM Sans', sans-serif" }}>
                           {isEstimating ? "…" : "re-estimate"}
@@ -1109,11 +1128,11 @@ export default function MealPlannerApp() {
       const data = await res.json();
       if (data.caloriesPerServing) {
         const updated = recipes.map(r =>
-          r.id === recipe.id ? { ...r, caloriesPerServing: data.caloriesPerServing } : r
+          r.id === recipe.id ? { ...r, caloriesPerServing: data.caloriesPerServing, calorieReasoning: data.calorieReasoning || "" } : r
         );
         setRecipes(updated);
         localStorage.setItem("mealplanner_recipes", JSON.stringify(updated));
-        return data.caloriesPerServing;
+        return { calories: data.caloriesPerServing, reasoning: data.calorieReasoning || "" };
       }
     } catch (err) {
       console.error("Failed to estimate calories:", err);
@@ -1310,8 +1329,8 @@ export default function MealPlannerApp() {
           onRate={r => { updateRating(selectedRecipe.id, r); setSelectedRecipe(prev => ({ ...prev, rating: r })); }}
           onMarkCooked={() => { markCooked(selectedRecipe.id); setSelectedRecipe(prev => ({ ...prev, timesCooked: (prev.timesCooked || 0) + 1 })); }}
           onEstimateCalories={async (recipe) => {
-            const cal = await estimateCalories(recipe);
-            if (cal) setSelectedRecipe(prev => ({ ...prev, caloriesPerServing: cal }));
+            const result = await estimateCalories(recipe);
+            if (result) setSelectedRecipe(prev => ({ ...prev, caloriesPerServing: result.calories, calorieReasoning: result.reasoning }));
           }}
           edits={recipeEdits[selectedRecipe.id]}
           onSaveEdits={edits => saveRecipeEdits(selectedRecipe.id, edits)}

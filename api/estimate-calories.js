@@ -19,7 +19,8 @@ export default async function handler(req, res) {
 Ingredients:
 ${ingredients.join("\n")}
 
-Respond with ONLY a single integer number representing estimated calories per serving. No explanation, no units, just the number.`;
+Respond with JSON only, no text outside the JSON object:
+{"calories": <integer calories per serving>, "breakdown": "<brief per-ingredient calorie list, one bullet point per line using •>"}`;
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -31,20 +32,29 @@ Respond with ONLY a single integer number representing estimated calories per se
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 16,
+        max_tokens: 400,
         messages: [{ role: "user", content: prompt }],
       }),
     });
 
     const data = await response.json();
     const text = data.content?.[0]?.text?.trim();
-    const calories = parseInt(text, 10);
+
+    let calories, breakdown;
+    try {
+      const parsed = JSON.parse(text);
+      calories = parseInt(parsed.calories, 10);
+      breakdown = parsed.breakdown || "";
+    } catch {
+      calories = parseInt(text, 10);
+      breakdown = "";
+    }
 
     if (isNaN(calories)) {
       return res.status(500).json({ error: "Could not parse calorie estimate" });
     }
 
-    return res.status(200).json({ caloriesPerServing: calories });
+    return res.status(200).json({ caloriesPerServing: calories, calorieReasoning: breakdown });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Failed to estimate calories" });
