@@ -1286,7 +1286,12 @@ function ShoppingListTab({ plan, recipes, recipeEdits, checkedItems, onSetChecke
       if (!map[cid]) map[cid] = { cat: item.category, items: [] };
       map[cid].items.push(item);
     });
-    Object.values(map).forEach(g => g.items.sort((a, b) => a.text.localeCompare(b.text)));
+    Object.values(map).forEach(g => g.items.sort((a, b) => {
+      // Sort by ingredient name (after leading quantity), not by the number
+      const nameA = (parseIngredientQty(a.text)?.rest || a.text).trim().toLowerCase();
+      const nameB = (parseIngredientQty(b.text)?.rest || b.text).trim().toLowerCase();
+      return nameA.localeCompare(nameB);
+    }));
     return CATEGORIES.map(cat => map[cat.id]).filter(Boolean);
   }, [filteredActive]);
 
@@ -1425,9 +1430,10 @@ function ShoppingListTab({ plan, recipes, recipeEdits, checkedItems, onSetChecke
                     style={{ width: 26, height: 26, borderRadius: "50%", border: "1.5px solid #d4c9b8", background: "#fff", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", color: "#8a7f72", padding: 0, lineHeight: 1, fontFamily: "inherit" }}
                   >+</button>
                 </div>
-                {servings !== baseServings && (
-                  <button onClick={() => setServings(recipe.id, baseServings)} style={{ fontSize: 10, color: "#8a7f72", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline", fontFamily: "'DM Sans', sans-serif" }}>reset</button>
-                )}
+                <button
+                  onClick={() => setServings(recipe.id, baseServings)}
+                  style={{ fontSize: 10, color: "#8a7f72", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline", fontFamily: "'DM Sans', sans-serif", visibility: servings !== baseServings ? "visible" : "hidden" }}
+                >reset</button>
               </div>
             </div>
           ))}
