@@ -261,7 +261,7 @@ function scaleIngredient(ing, ratio) {
 
 // ─── Recipe Detail Modal ──────────────────────────────────────────────────────
 
-function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalories }) {
+function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalories, edits, onSaveEdits }) {
   useEffect(() => {
     function handleKey(e) { if (e.key === "Escape") onClose(); }
     window.addEventListener("keydown", handleKey);
@@ -271,7 +271,73 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
   const origServings = parseServings(recipe.yield);
   const [servingCount, setServingCount] = useState(origServings);
   const [isEstimating, setIsEstimating] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftIngredients, setDraftIngredients] = useState([]);
+  const [draftInstructions, setDraftInstructions] = useState([]);
+  const [newComment, setNewComment] = useState("");
+
   const ratio = origServings > 0 ? servingCount / origServings : 1;
+
+  const effectiveTitle = edits?.title ?? recipe.title;
+  const effectiveIngredients = edits?.ingredients ?? recipe.ingredients ?? [];
+  const effectiveInstructions = edits?.instructions ?? recipe.instructions ?? [];
+  const comments = edits?.comments ?? [];
+
+  function enterEditMode() {
+    setDraftTitle(effectiveTitle);
+    setDraftIngredients([...effectiveIngredients]);
+    setDraftInstructions([...effectiveInstructions]);
+    setEditMode(true);
+  }
+
+  function cancelEdit() {
+    setEditMode(false);
+  }
+
+  function saveEdit() {
+    const autoNotes = [];
+    const ts = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const filteredIngredients = draftIngredients.filter(i => i.trim());
+    const filteredInstructions = draftInstructions.filter(s => s.trim());
+
+    if (draftTitle.trim() && draftTitle.trim() !== effectiveTitle) {
+      autoNotes.push({ id: `${Date.now()}-title`, text: `Title changed: "${effectiveTitle}" → "${draftTitle.trim()}"`, timestamp: ts, isAutoNote: true });
+    }
+    const removedIngs = effectiveIngredients.filter(i => !filteredIngredients.includes(i));
+    const addedIngs = filteredIngredients.filter(i => !effectiveIngredients.includes(i));
+    if (removedIngs.length > 0) {
+      autoNotes.push({ id: `${Date.now()}-ing-rem`, text: `Removed ingredient${removedIngs.length > 1 ? "s" : ""}: ${removedIngs.join(", ")}`, timestamp: ts, isAutoNote: true });
+    }
+    if (addedIngs.length > 0) {
+      autoNotes.push({ id: `${Date.now()}-ing-add`, text: `Added ingredient${addedIngs.length > 1 ? "s" : ""}: ${addedIngs.join(", ")}`, timestamp: ts, isAutoNote: true });
+    }
+    const instructionsChanged = filteredInstructions.length !== effectiveInstructions.length || filteredInstructions.some((s, i) => s !== effectiveInstructions[i]);
+    if (instructionsChanged) {
+      autoNotes.push({ id: `${Date.now()}-inst`, text: "Preparation steps updated", timestamp: ts, isAutoNote: true });
+    }
+    const newEdits = {
+      ...(edits || {}),
+      title: draftTitle.trim() || effectiveTitle,
+      ingredients: filteredIngredients,
+      instructions: filteredInstructions,
+      comments: [...comments, ...autoNotes],
+    };
+    onSaveEdits(newEdits);
+    setEditMode(false);
+  }
+
+  function submitComment() {
+    if (!newComment.trim()) return;
+    const ts = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const comment = { id: `${Date.now()}-comment`, text: newComment.trim(), timestamp: ts, isAutoNote: false };
+    onSaveEdits({ ...(edits || {}), comments: [...comments, comment] });
+    setNewComment("");
+  }
+
+  function deleteComment(id) {
+    onSaveEdits({ ...(edits || {}), comments: comments.filter(c => c.id !== id) });
+  }
 
   async function handleEstimate() {
     setIsEstimating(true);
@@ -342,13 +408,57 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
         <div style={{ padding: "28px 36px 36px" }}>
 
           {/* Title + author + rating row */}
-          <h1 style={{
-            fontFamily: "'Cormorant Garamond', serif",
-            fontSize: 38, fontWeight: 700, margin: "0 0 6px",
-            lineHeight: 1.15, color: "#1c1915",
-          }}>
-            {recipe.title}
-          </h1>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 6 }}>
+            {editMode ? (
+              <input
+                value={draftTitle}
+                onChange={e => setDraftTitle(e.target.value)}
+                style={{
+                  fontFamily: "'Cormorant Garamond', serif",
+                  fontSize: 32, fontWeight: 700, lineHeight: 1.15, color: "#1c1915",
+                  border: "none", borderBottom: "2px solid #c8a03c", background: "transparent",
+                  outline: "none", flex: 1, padding: "2px 0",
+                }}
+              />
+            ) : (
+              <h1 style={{
+                fontFamily: "'Cormorant Garamond', serif",
+                fontSize: 38, fontWeight: 700, margin: 0,
+                lineHeight: 1.15, color: "#1c1915", flex: 1,
+              }}>
+                {effectiveTitle}
+              </h1>
+            )}
+            {!editMode ? (
+              <button
+                onClick={enterEditMode}
+                style={{
+                  background: "none", border: "1px solid #d4c9b8", borderRadius: 8,
+                  padding: "6px 14px", fontSize: 12, color: "#8a7f72", cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif", flexShrink: 0, marginTop: 6,
+                }}
+              >✏️ Edit Recipe</button>
+            ) : (
+              <div style={{ display: "flex", gap: 8, flexShrink: 0, marginTop: 6 }}>
+                <button
+                  onClick={saveEdit}
+                  style={{
+                    background: "#1c1915", color: "#f5f0e8", border: "none", borderRadius: 8,
+                    padding: "6px 16px", fontSize: 12, fontWeight: 500, cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >Save</button>
+                <button
+                  onClick={cancelEdit}
+                  style={{
+                    background: "none", border: "1px solid #d4c9b8", borderRadius: 8,
+                    padding: "6px 14px", fontSize: 12, color: "#8a7f72", cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >Cancel</button>
+              </div>
+            )}
+          </div>
           {recipe.author && (
             <div style={{ fontSize: 13, color: "#8a7f72", marginBottom: 14 }}>
               By {recipe.author}
@@ -438,18 +548,18 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
           )}
 
           {/* Ingredients + Instructions two-column */}
-          {(recipe.ingredients?.length > 0 || recipe.instructions?.length > 0) && (
+          {(effectiveIngredients.length > 0 || effectiveInstructions.length > 0 || editMode) && (
             <>
               <div style={{ height: 1, background: "#e8e0d4", margin: "0 0 28px" }} />
               <div style={{
                 display: "grid",
-                gridTemplateColumns: recipe.instructions?.length > 0 ? "1fr 1.8fr" : "1fr",
+                gridTemplateColumns: effectiveInstructions.length > 0 ? "1fr 1.8fr" : "1fr",
                 gap: 40,
                 alignItems: "start",
               }}>
 
                 {/* Ingredients */}
-                {recipe.ingredients?.length > 0 && (
+                {(effectiveIngredients.length > 0 || editMode) && (
                   <div>
                     <div style={{
                       fontSize: 10, color: "#8a7f72", textTransform: "uppercase",
@@ -458,20 +568,59 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
                     }}>
                       Ingredients
                     </div>
-                    {recipe.ingredients.map((ing, i) => (
-                      <div key={i} style={{
-                        fontSize: 14, color: "#1c1915", lineHeight: 1.7,
-                        padding: "7px 0",
-                        borderBottom: "1px solid #f0ebe2",
-                      }}>
-                        {scaleIngredient(ing, ratio).replace(/(\d)([a-zA-Z])/g, "$1 $2")}
-                      </div>
-                    ))}
+                    {editMode ? (
+                      <>
+                        {draftIngredients.map((ing, i) => (
+                          <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                            <input
+                              value={ing}
+                              onChange={e => {
+                                const next = [...draftIngredients];
+                                next[i] = e.target.value;
+                                setDraftIngredients(next);
+                              }}
+                              style={{
+                                flex: 1, border: "1px solid #d4c9b8", borderRadius: 6,
+                                padding: "6px 10px", fontSize: 13, fontFamily: "'DM Sans', sans-serif",
+                                color: "#1c1915", background: "#fff", outline: "none",
+                              }}
+                            />
+                            <button
+                              onClick={() => setDraftIngredients(draftIngredients.filter((_, j) => j !== i))}
+                              style={{
+                                background: "none", border: "1px solid #e8d0d0", borderRadius: 6,
+                                width: 28, height: 28, cursor: "pointer", color: "#c94040",
+                                fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center",
+                                flexShrink: 0, padding: 0,
+                              }}
+                            >×</button>
+                          </div>
+                        ))}
+                        <button
+                          onClick={() => setDraftIngredients([...draftIngredients, ""])}
+                          style={{
+                            background: "none", border: "1.5px dashed #c8a03c", borderRadius: 8,
+                            padding: "7px 14px", fontSize: 12, color: "#c8a03c", cursor: "pointer",
+                            fontFamily: "'DM Sans', sans-serif", marginTop: 4, width: "100%",
+                          }}
+                        >+ Add Ingredient</button>
+                      </>
+                    ) : (
+                      effectiveIngredients.map((ing, i) => (
+                        <div key={i} style={{
+                          fontSize: 14, color: "#1c1915", lineHeight: 1.7,
+                          padding: "7px 0",
+                          borderBottom: "1px solid #f0ebe2",
+                        }}>
+                          {scaleIngredient(ing, ratio).replace(/(\d)([a-zA-Z])/g, "$1 $2")}
+                        </div>
+                      ))
+                    )}
                   </div>
                 )}
 
                 {/* Instructions */}
-                {recipe.instructions?.length > 0 && (
+                {(effectiveInstructions.length > 0 || editMode) && (
                   <div>
                     <div style={{
                       fontSize: 10, color: "#8a7f72", textTransform: "uppercase",
@@ -480,20 +629,68 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
                     }}>
                       Preparation
                     </div>
-                    {recipe.instructions.map((step, i) => (
-                      <div key={i} style={{ display: "flex", gap: 16, marginBottom: 22 }}>
-                        <div style={{
-                          fontFamily: "'Cormorant Garamond', serif",
-                          fontSize: 22, fontWeight: 700, color: "#c8a03c",
-                          lineHeight: 1, paddingTop: 2, minWidth: 24, flexShrink: 0,
-                        }}>
-                          {i + 1}
+                    {editMode ? (
+                      <>
+                        {draftInstructions.map((step, i) => (
+                          <div key={i} style={{ display: "flex", gap: 12, marginBottom: 10, alignItems: "flex-start" }}>
+                            <div style={{
+                              fontFamily: "'Cormorant Garamond', serif",
+                              fontSize: 22, fontWeight: 700, color: "#c8a03c",
+                              lineHeight: 1, paddingTop: 6, minWidth: 24, flexShrink: 0,
+                            }}>
+                              {i + 1}
+                            </div>
+                            <textarea
+                              value={step}
+                              onChange={e => {
+                                const next = [...draftInstructions];
+                                next[i] = e.target.value;
+                                setDraftInstructions(next);
+                              }}
+                              rows={3}
+                              style={{
+                                flex: 1, border: "1px solid #d4c9b8", borderRadius: 6,
+                                padding: "7px 10px", fontSize: 13, fontFamily: "'DM Sans', sans-serif",
+                                color: "#1c1915", background: "#fff", outline: "none",
+                                lineHeight: 1.6, resize: "vertical",
+                              }}
+                            />
+                            <button
+                              onClick={() => setDraftInstructions(draftInstructions.filter((_, j) => j !== i))}
+                              style={{
+                                background: "none", border: "1px solid #e8d0d0", borderRadius: 6,
+                                width: 28, height: 28, cursor: "pointer", color: "#c94040",
+                                fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center",
+                                flexShrink: 0, padding: 0, marginTop: 4,
+                              }}
+                            >×</button>
+                          </div>
+                        ))}
+                        <button
+                          onClick={() => setDraftInstructions([...draftInstructions, ""])}
+                          style={{
+                            background: "none", border: "1.5px dashed #c8a03c", borderRadius: 8,
+                            padding: "7px 14px", fontSize: 12, color: "#c8a03c", cursor: "pointer",
+                            fontFamily: "'DM Sans', sans-serif", marginTop: 4, width: "100%",
+                          }}
+                        >+ Add Step</button>
+                      </>
+                    ) : (
+                      effectiveInstructions.map((step, i) => (
+                        <div key={i} style={{ display: "flex", gap: 16, marginBottom: 22 }}>
+                          <div style={{
+                            fontFamily: "'Cormorant Garamond', serif",
+                            fontSize: 22, fontWeight: 700, color: "#c8a03c",
+                            lineHeight: 1, paddingTop: 2, minWidth: 24, flexShrink: 0,
+                          }}>
+                            {i + 1}
+                          </div>
+                          <p style={{ fontSize: 14, color: "#1c1915", lineHeight: 1.8, margin: 0 }}>
+                            {step}
+                          </p>
                         </div>
-                        <p style={{ fontSize: 14, color: "#1c1915", lineHeight: 1.8, margin: 0 }}>
-                          {step}
-                        </p>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 )}
               </div>
@@ -528,6 +725,79 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
               </div>
             </>
           )}
+
+          {/* Comments */}
+          <div style={{ height: 1, background: "#e8e0d4", margin: "28px 0 20px" }} />
+          <div>
+            <div style={{
+              fontSize: 10, color: "#8a7f72", textTransform: "uppercase",
+              letterSpacing: "0.1em", fontWeight: 500,
+              borderBottom: "1px solid #c8a03c", paddingBottom: 8, marginBottom: 16,
+            }}>
+              Comments & Notes
+            </div>
+
+            {/* Existing comments */}
+            {comments.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                {comments.map(comment => (
+                  <div key={comment.id} style={{
+                    background: comment.isAutoNote ? "#f8f5ef" : "#fff",
+                    border: `1px solid ${comment.isAutoNote ? "#e8e0d4" : "#d4c9b8"}`,
+                    borderRadius: 8, padding: "10px 14px", marginBottom: 8,
+                    display: "flex", gap: 10, alignItems: "flex-start",
+                  }}>
+                    <div style={{ flex: 1 }}>
+                      {comment.isAutoNote && (
+                        <span style={{
+                          fontSize: 10, color: "#c8a03c", fontWeight: 500,
+                          background: "rgba(200,160,60,0.12)", borderRadius: 4,
+                          padding: "1px 6px", marginRight: 6, letterSpacing: "0.04em",
+                        }}>auto-note</span>
+                      )}
+                      <span style={{ fontSize: 13, color: "#1c1915", lineHeight: 1.6 }}>{comment.text}</span>
+                      <div style={{ fontSize: 10, color: "#b0a898", marginTop: 4 }}>{comment.timestamp}</div>
+                    </div>
+                    <button
+                      onClick={() => deleteComment(comment.id)}
+                      style={{
+                        background: "none", border: "none", cursor: "pointer",
+                        color: "#c0b8ac", fontSize: 14, padding: 2, lineHeight: 1, flexShrink: 0,
+                      }}
+                    >×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* New comment input */}
+            <div style={{ display: "flex", gap: 8 }}>
+              <textarea
+                value={newComment}
+                onChange={e => setNewComment(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComment(); } }}
+                placeholder="Add a comment… (Enter to submit, Shift+Enter for new line)"
+                rows={2}
+                style={{
+                  flex: 1, border: "1.5px solid #e8e0d4", borderRadius: 8,
+                  padding: "9px 12px", fontSize: 13, fontFamily: "'DM Sans', sans-serif",
+                  color: "#1c1915", background: "#fff", outline: "none",
+                  lineHeight: 1.6, resize: "none",
+                }}
+              />
+              <button
+                onClick={submitComment}
+                disabled={!newComment.trim()}
+                style={{
+                  background: newComment.trim() ? "#1c1915" : "#e8e0d4",
+                  color: newComment.trim() ? "#f5f0e8" : "#b0a898",
+                  border: "none", borderRadius: 8,
+                  padding: "0 18px", fontSize: 13, fontWeight: 500, cursor: newComment.trim() ? "pointer" : "default",
+                  fontFamily: "'DM Sans', sans-serif", flexShrink: 0, transition: "all 0.15s",
+                }}
+              >Post</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -728,6 +998,7 @@ export default function MealPlannerApp() {
   const [editingGoal, setEditingGoal] = useState(false);
   const [recipeSearch, setRecipeSearch] = useState("");
   const [recipeSort, setRecipeSort] = useState("default");
+  const [recipeEdits, setRecipeEdits] = useState({});
 
   // Auth state
   const [token, setToken] = useState(null);
@@ -777,6 +1048,8 @@ export default function MealPlannerApp() {
       if (cachedRecipes) setRecipes(JSON.parse(cachedRecipes));
       const lastSync = localStorage.getItem("mealplanner_last_sync");
       if (lastSync) setLastSyncTime(lastSync);
+      const savedEdits = localStorage.getItem("mealplanner_recipe_edits");
+      if (savedEdits) setRecipeEdits(JSON.parse(savedEdits));
     } catch {}
   }, []);
 
@@ -868,6 +1141,14 @@ export default function MealPlannerApp() {
 
   function markCooked(id) {
     setRecipes(rs => rs.map(r => r.id === id ? { ...r, timesCooked: (r.timesCooked || 0) + 1 } : r));
+  }
+
+  function saveRecipeEdits(recipeId, edits) {
+    setRecipeEdits(prev => {
+      const updated = { ...prev, [recipeId]: edits };
+      localStorage.setItem("mealplanner_recipe_edits", JSON.stringify(updated));
+      return updated;
+    });
   }
 
   const tabs = [
@@ -1032,6 +1313,8 @@ export default function MealPlannerApp() {
             const cal = await estimateCalories(recipe);
             if (cal) setSelectedRecipe(prev => ({ ...prev, caloriesPerServing: cal }));
           }}
+          edits={recipeEdits[selectedRecipe.id]}
+          onSaveEdits={edits => saveRecipeEdits(selectedRecipe.id, edits)}
         />
       )}
 
@@ -1188,7 +1471,7 @@ export default function MealPlannerApp() {
                                     >
                                       <div style={{ fontSize: 18, marginBottom: 3 }}>{recipeEmoji(recipe.id)}</div>
                                       <div style={{ fontSize: 11, fontWeight: 500, lineHeight: 1.3, color: "#1c1915", marginBottom: 3 }}>
-                                        {recipe.title.length > 28 ? recipe.title.slice(0, 28) + "…" : recipe.title}
+                                        {((recipeEdits[recipe.id]?.title ?? recipe.title).length > 28 ? (recipeEdits[recipe.id]?.title ?? recipe.title).slice(0, 28) + "…" : (recipeEdits[recipe.id]?.title ?? recipe.title))}
                                       </div>
                                       <div style={{ fontSize: 10, color: "#8a7f72" }}>{recipe.caloriesPerServing} cal</div>
                                       <button
@@ -1340,7 +1623,7 @@ export default function MealPlannerApp() {
                               <div style={{ fontSize: 36, marginBottom: 8 }}>{recipeEmoji(recipe.id)}</div>
                             )}
                             <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, fontWeight: 600, color: "#f5f0e8", lineHeight: 1.3 }}>
-                              {recipe.title}
+                              {recipeEdits[recipe.id]?.title ?? recipe.title}
                             </div>
                             <div style={{ marginTop: 6 }}>
                               <StarRating rating={recipe.rating} onChange={r => updateRating(recipe.id, r)} />
