@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -36,6 +36,98 @@ function getDayCalories(dayPlan, recipes) {
   }, 0);
 }
 
+// ─── Shopping List Helpers ────────────────────────────────────────────────────
+
+const CATEGORIES = [
+  { id: "produce",  icon: "🥬", name: "Produce",        keywords: ["tomato","lettuce","spinach","kale","onion","garlic","ginger","lemon","lime","apple","banana","pepper","broccoli","carrot","celery","cucumber","zucchini","herb","cilantro","parsley","basil","avocado","mushroom","potato","sweet potato","scallion","shallot","arugula","chard","beet","radish","fennel","artichoke","asparagus","corn","pea","bean sprout","green bean","bok choy","leek","chive"] },
+  { id: "meat",     icon: "🥩", name: "Meat & Seafood",  keywords: ["chicken","beef","pork","turkey","salmon","shrimp","tuna","bacon","sausage","lamb","steak","thigh","breast","ground","cod","tilapia","halibut","crab","lobster","scallop","anchov","prosciutto","pancetta","chorizo","duck","venison","bison"] },
+  { id: "dairy",    icon: "🥛", name: "Dairy & Eggs",    keywords: ["milk","cheese","butter","cream","yogurt","egg","cheddar","mozzarella","parmesan","ricotta","sour cream","half-and-half","whipping cream","heavy cream","feta","goat cheese","brie","cottage cheese","kefir","ghee","crème fraîche"] },
+  { id: "pantry",   icon: "🥫", name: "Pantry & Canned", keywords: ["sauce","soy sauce","gochujang","honey","oil","vinegar","broth","stock","canned","beans","lentil","tomato paste","coconut milk","flour","sugar","salt","spice","cumin","paprika","oregano","sesame","mustard","mayo","ketchup","pepper","baking","tahini","miso","fish sauce","oyster sauce","hoisin","sriracha","hot sauce","curry","turmeric","coriander","cardamom","cinnamon","nutmeg","bay leaf","thyme","rosemary","sage","chili flake","red pepper flake","dressing","syrup","jam","paste","puree","chickpea","black bean","kidney bean","lentil","split pea","tofu","tempeh","nutritional yeast","anchovy paste","capers","olive","pickle","sauerkraut","kimchi","nori"] },
+  { id: "grains",   icon: "🍞", name: "Bread & Grains",  keywords: ["bread","rice","pasta","noodle","tortilla","wrap","bagel","oats","quinoa","couscous","cereal","cracker","panko","breadcrumb","pita","roll","baguette","sourdough","rye","barley","farro","bulgur","polenta","grits","semolina","spaghetti","linguine","fettuccine","penne","rigatoni","orzo","udon","ramen","soba","rice noodle","lasagna","macaroni"] },
+  { id: "frozen",   icon: "🧊", name: "Frozen",          keywords: ["frozen","ice cream","gelato","sorbet"] },
+  { id: "other",    icon: "🧴", name: "Other",            keywords: [] },
+];
+
+function detectCategory(text) {
+  const lower = text.toLowerCase();
+  for (const cat of CATEGORIES) {
+    if (cat.id === "other") return cat;
+    if (cat.keywords.some(kw => lower.includes(kw))) return cat;
+  }
+  return CATEGORIES[CATEGORIES.length - 1];
+}
+
+// Quantity parsing helpers
+const UNICODE_FRACS = { "½":0.5, "⅓":1/3, "⅔":2/3, "¼":0.25, "¾":0.75, "⅛":0.125, "⅜":0.375, "⅝":0.625, "⅞":0.875 };
+const FRAC_DISPLAY   = [[0.875,"⅞"],[0.75,"¾"],[0.625,"⅝"],[0.5,"½"],[0.375,"⅜"],[0.25,"¼"],[1/3,"⅓"],[2/3,"⅔"],[0.125,"⅛"]];
+
+function parseIngredientQty(text) {
+  // Match: optional whole number, optional unicode fraction, optional /denom, then rest
+  const m = text.match(/^(\d+)?([\u00BC-\u00BE\u2150-\u215E])?(?:\s*\/\s*(\d+))?\s*(.*)/);
+  if (!m || (!m[1] && !m[2])) return null;
+  const whole = m[1] ? parseInt(m[1]) : 0;
+  const unicodeFrac = m[2] ? (UNICODE_FRACS[m[2]] || 0) : 0;
+  const denomStr = m[3];
+  let value;
+  if (denomStr && !unicodeFrac) {
+    value = whole + 1 / parseInt(denomStr);
+  } else {
+    value = whole + unicodeFrac;
+  }
+  if (value <= 0) return null;
+  return { value, rest: m[4] || "" };
+}
+
+function formatQty(value) {
+  if (value <= 0) return "0";
+  const whole = Math.floor(value);
+  const frac = value - whole;
+  const nearFrac = FRAC_DISPLAY.find(([f]) => Math.abs(f - frac) < 0.06);
+  if (Math.abs(frac) < 0.06) return String(whole || 0);
+  if (whole === 0 && nearFrac) return nearFrac[1];
+  if (nearFrac) return `${whole}${nearFrac[1]}`;
+  return value % 1 === 0 ? String(value) : value.toFixed(1);
+}
+
+function getQtyStep(value) {
+  if (value <= 0.25) return 0.125;
+  if (value < 1) return 0.25;
+  return 1;
+}
+
+function generateShoppingItems(plan, recipes, recipeEdits, manualItems, qtyOverrides) {
+  const itemMap = {};
+  DAYS.forEach(day => {
+    MEALS.forEach(meal => {
+      const id = plan[day]?.[meal];
+      if (!id) return;
+      const r = recipes.find(rec => rec.id === id);
+      if (!r) return;
+      const ings = recipeEdits[id]?.ingredients ?? r.ingredients ?? [];
+      ings.forEach(ing => {
+        const key = ing.toLowerCase().trim();
+        if (!itemMap[key]) itemMap[key] = { key, origText: ing, count: 0, isManual: false };
+        itemMap[key].count++;
+      });
+    });
+  });
+  const planItems = Object.values(itemMap).map(it => ({
+    ...it,
+    text: qtyOverrides[it.key] ?? it.origText,
+    category: detectCategory(it.origText),
+  }));
+  const manualFormatted = (manualItems || []).map(mi => ({
+    key: mi.id,
+    origText: mi.text,
+    text: qtyOverrides[mi.id] ?? mi.text,
+    count: 1,
+    isManual: true,
+    category: detectCategory(mi.text),
+  }));
+  return [...planItems, ...manualFormatted];
+}
+
+// Legacy wrapper kept for calorie tab (not used for shopping display)
 function generateShoppingList(plan, recipes) {
   const ingredientMap = {};
   Object.values(plan).forEach(dayPlan => {
@@ -43,7 +135,7 @@ function generateShoppingList(plan, recipes) {
       if (!id) return;
       const r = getRecipe(id, recipes);
       if (!r) return;
-      r.ingredients.forEach(ing => {
+      (r.ingredients || []).forEach(ing => {
         const key = ing.toLowerCase().trim();
         ingredientMap[key] = (ingredientMap[key] || 0) + 1;
       });
@@ -1002,6 +1094,365 @@ function RecipePicker({ recipes, target, search, onSearchChange, onSelect, onClo
   );
 }
 
+// ─── Shopping: SwipeableItem ──────────────────────────────────────────────────
+
+function ShoppingItem({ item, checked, onToggle, onDelete, onAdjustQty, search }) {
+  const rowRef = useRef(null);
+  const swipe = useRef({ startX: 0, startY: 0, dx: 0, active: false, didSwipe: false });
+
+  function onTouchStart(e) {
+    swipe.current = { startX: e.touches[0].clientX, startY: e.touches[0].clientY, dx: 0, active: false, didSwipe: false };
+  }
+  function onTouchMove(e) {
+    const dx = e.touches[0].clientX - swipe.current.startX;
+    const dy = e.touches[0].clientY - swipe.current.startY;
+    if (!swipe.current.active) {
+      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+      if (Math.abs(dy) > Math.abs(dx)) return; // vertical scroll wins
+      swipe.current.active = true;
+    }
+    const clamped = Math.min(0, dx);
+    swipe.current.dx = clamped;
+    if (rowRef.current) rowRef.current.style.transform = `translateX(${clamped}px)`;
+    e.preventDefault();
+  }
+  function onTouchEnd() {
+    if (!swipe.current.active) return;
+    const dx = swipe.current.dx;
+    const width = rowRef.current?.offsetWidth || 300;
+    swipe.current.active = false;
+    swipe.current.didSwipe = true;
+    setTimeout(() => { swipe.current.didSwipe = false; }, 50);
+    if (Math.abs(dx) > width * 0.45) {
+      if (rowRef.current) { rowRef.current.style.transition = "transform 0.15s"; rowRef.current.style.transform = "translateX(-110%)"; }
+      setTimeout(onDelete, 160);
+    } else {
+      if (rowRef.current) {
+        rowRef.current.style.transition = "transform 0.2s";
+        rowRef.current.style.transform = "translateX(0)";
+        setTimeout(() => { if (rowRef.current) rowRef.current.style.transition = ""; }, 220);
+      }
+    }
+  }
+
+  const parsed = parseIngredientQty(item.text);
+
+  function highlightText(text) {
+    if (!search) return text;
+    const idx = text.toLowerCase().indexOf(search.toLowerCase());
+    if (idx === -1) return text;
+    return <>{text.slice(0, idx)}<mark style={{ background: "#ffe066", borderRadius: 2, padding: "0 1px" }}>{text.slice(idx, idx + search.length)}</mark>{text.slice(idx + search.length)}</>;
+  }
+
+  return (
+    <div style={{ position: "relative", overflow: "hidden", marginBottom: 8, borderRadius: 10 }}>
+      {/* Red delete background */}
+      <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 72, background: "#e53535", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>🗑️</div>
+      {/* Item row */}
+      <div
+        ref={rowRef}
+        onClick={() => { if (!swipe.current.didSwipe) onToggle(); }}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        style={{
+          background: checked ? "#f0ebe2" : "#faf7f2",
+          border: `1.5px solid ${checked ? "#d4c9b8" : "#e8e0d4"}`,
+          borderRadius: 10, padding: "11px 14px", cursor: "pointer",
+          display: "flex", alignItems: "center", gap: 10,
+          opacity: checked ? 0.55 : 1,
+          transition: "opacity 0.3s",
+          position: "relative", zIndex: 1,
+        }}
+      >
+        {/* Checkbox */}
+        <div style={{ width: 20, height: 20, borderRadius: 5, border: `2px solid ${checked ? "#4a7c59" : "#c8bfb0"}`, background: checked ? "#4a7c59" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.15s" }}>
+          {checked && <span style={{ color: "white", fontSize: 11, lineHeight: 1 }}>✓</span>}
+        </div>
+        {/* Text */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, color: "#1c1915", textDecoration: checked ? "line-through" : "none", textDecorationColor: "#8a7f72", lineHeight: 1.4 }}>
+            {highlightText(item.text)}
+          </div>
+          {item.count > 1 && !item.isManual && (
+            <div style={{ fontSize: 10, color: "#8a7f72", marginTop: 2 }}>used in {item.count} recipes</div>
+          )}
+        </div>
+        {/* Qty +/- */}
+        {parsed && !checked && (
+          <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+            <button onClick={() => onAdjustQty(-getQtyStep(parsed.value))} style={{ width: 22, height: 22, borderRadius: "50%", border: "1px solid #d4c9b8", background: "#fff", cursor: "pointer", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center", color: "#8a7f72", padding: 0, lineHeight: 1, fontFamily: "inherit" }}>−</button>
+            <button onClick={() => onAdjustQty(getQtyStep(parsed.value))} style={{ width: 22, height: 22, borderRadius: "50%", border: "1px solid #d4c9b8", background: "#fff", cursor: "pointer", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center", color: "#8a7f72", padding: 0, lineHeight: 1, fontFamily: "inherit" }}>+</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Shopping: Main Tab Component ─────────────────────────────────────────────
+
+function ShoppingListTab({ plan, recipes, recipeEdits, checkedItems, onSetCheckedItems }) {
+  const [search, setSearch] = useState("");
+  const [collapsed, setCollapsed] = useState(new Set());
+  const [completedCollapsed, setCompletedCollapsed] = useState(true);
+  const [manualItems, setManualItems] = useState([]);
+  const [qtyOverrides, setQtyOverrides] = useState({});
+  const [hidden, setHidden] = useState(new Set());
+  const [toast, setToast] = useState(null); // { type:"copy"|"undo", text? }
+  const [addText, setAddText] = useState("");
+  const [addExpanded, setAddExpanded] = useState(false);
+  const [showBanner, setShowBanner] = useState(false);
+  const undoTimer = useRef(null);
+  const lastDeleted = useRef(null);
+  const addInputRef = useRef(null);
+
+  // Load from localStorage
+  useEffect(() => {
+    try {
+      const m = localStorage.getItem("mealplanner_manual_items"); if (m) setManualItems(JSON.parse(m));
+      const q = localStorage.getItem("mealplanner_qty_overrides"); if (q) setQtyOverrides(JSON.parse(q));
+      const h = localStorage.getItem("mealplanner_hidden_items"); if (h) setHidden(new Set(JSON.parse(h)));
+    } catch {}
+    // iOS install banner
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.navigator.standalone;
+    const dismissed = localStorage.getItem("mealplanner_banner_dismissed");
+    if (isIOS && !dismissed) setShowBanner(true);
+    // Android/Chrome install prompt
+    window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); if (!localStorage.getItem("mealplanner_banner_dismissed")) setShowBanner(true); });
+  }, []);
+
+  useEffect(() => { localStorage.setItem("mealplanner_manual_items", JSON.stringify(manualItems)); }, [manualItems]);
+  useEffect(() => { localStorage.setItem("mealplanner_qty_overrides", JSON.stringify(qtyOverrides)); }, [qtyOverrides]);
+  useEffect(() => { localStorage.setItem("mealplanner_hidden_items", JSON.stringify([...hidden])); }, [hidden]);
+
+  const allItems = useMemo(
+    () => generateShoppingItems(plan, recipes, recipeEdits, manualItems, qtyOverrides),
+    [plan, recipes, recipeEdits, manualItems, qtyOverrides]
+  );
+
+  const visibleItems = useMemo(() => allItems.filter(it => !hidden.has(it.key)), [allItems, hidden]);
+  const activeItems  = useMemo(() => visibleItems.filter(it => !checkedItems[it.key]), [visibleItems, checkedItems]);
+  const doneItems    = useMemo(() => visibleItems.filter(it => !!checkedItems[it.key]), [visibleItems, checkedItems]);
+
+  const searchLower = search.toLowerCase();
+  const filteredActive = useMemo(
+    () => search ? activeItems.filter(it => it.text.toLowerCase().includes(searchLower)) : activeItems,
+    [activeItems, search, searchLower]
+  );
+
+  const grouped = useMemo(() => {
+    const map = {};
+    filteredActive.forEach(item => {
+      const cid = item.category.id;
+      if (!map[cid]) map[cid] = { cat: item.category, items: [] };
+      map[cid].items.push(item);
+    });
+    Object.values(map).forEach(g => g.items.sort((a, b) => a.text.localeCompare(b.text)));
+    return CATEGORIES.map(cat => map[cat.id]).filter(Boolean);
+  }, [filteredActive]);
+
+  function toggleCheck(key) { onSetCheckedItems(c => ({ ...c, [key]: !c[key] })); }
+
+  function deleteItem(item) {
+    setHidden(h => new Set([...h, item.key]));
+    lastDeleted.current = item;
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    setToast({ type: "undo", text: item.text });
+    undoTimer.current = setTimeout(() => { setToast(null); lastDeleted.current = null; }, 4000);
+  }
+
+  function undoDelete() {
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    if (lastDeleted.current) {
+      const it = lastDeleted.current;
+      setHidden(h => { const n = new Set(h); n.delete(it.key); return n; });
+      lastDeleted.current = null;
+    }
+    setToast(null);
+  }
+
+  function adjustQty(item, delta) {
+    const parsed = parseIngredientQty(item.text);
+    if (!parsed) return;
+    const newVal = Math.max(0, parsed.value + delta);
+    if (newVal === 0) { deleteItem(item); return; }
+    const newText = formatQty(newVal) + (parsed.rest ? " " + parsed.rest : "");
+    setQtyOverrides(q => ({ ...q, [item.key]: newText }));
+  }
+
+  function addManualItem() {
+    const text = addText.trim();
+    if (!text) return;
+    const id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setManualItems(m => [...m, { id, text }]);
+    setAddText("");
+    setAddExpanded(false);
+  }
+
+  async function copyList() {
+    const lines = ["🛒 My Meal Plan Shopping List", ""];
+    CATEGORIES.forEach(cat => {
+      const items = filteredActive.filter(it => it.category.id === cat.id && !checkedItems[it.key]);
+      if (!items.length) return;
+      lines.push(`${cat.icon} ${cat.name.toUpperCase()}`);
+      items.forEach(it => lines.push(`• ${it.text}`));
+      lines.push("");
+    });
+    const text = lines.join("\n").trim();
+    if (navigator.share && /mobile|android|iphone|ipad/i.test(navigator.userAgent)) {
+      try { await navigator.share({ title: "Shopping List", text }); return; } catch {}
+    }
+    try { await navigator.clipboard.writeText(text); } catch { try { const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); } catch {} }
+    setToast({ type: "copy" });
+    setTimeout(() => setToast(null), 2000);
+  }
+
+  function resetAll() {
+    onSetCheckedItems({});
+    setHidden(new Set());
+    setManualItems([]);
+    setQtyOverrides({});
+    localStorage.removeItem("mealplanner_manual_items");
+    localStorage.removeItem("mealplanner_qty_overrides");
+    localStorage.removeItem("mealplanner_hidden_items");
+  }
+
+  function toggleCollapse(catId) {
+    setCollapsed(c => { const n = new Set(c); n.has(catId) ? n.delete(catId) : n.add(catId); return n; });
+  }
+
+  const smallBtn = { background: "none", border: "1px solid #d4c9b8", borderRadius: 8, padding: "6px 14px", fontSize: 12, color: "#8a7f72", cursor: "pointer", fontFamily: "'DM Sans', sans-serif" };
+  const sectionHeaderStyle = { width: "100%", background: "none", border: "none", padding: "10px 0 8px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, fontWeight: 600, color: "#5a544c", letterSpacing: "0.05em", textTransform: "uppercase", fontFamily: "'DM Sans', sans-serif" };
+
+  return (
+    <div className="fade-in">
+      {/* PWA install banner */}
+      {showBanner && (
+        <div style={{ background: "#2c2820", color: "#f5f0e8", borderRadius: 10, padding: "12px 16px", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between", maxWidth: 720 }}>
+          <span style={{ fontSize: 13 }}>📲 Add Meal Planner to your home screen for quick access</span>
+          <button onClick={() => { setShowBanner(false); localStorage.setItem("mealplanner_banner_dismissed", "1"); }} style={{ background: "none", border: "none", color: "#8a7f72", fontSize: 18, cursor: "pointer", padding: "0 0 0 12px", lineHeight: 1 }}>×</button>
+        </div>
+      )}
+
+      {/* Header */}
+      <div style={{ marginBottom: 20, display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <h1 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 36, fontWeight: 600, margin: 0 }}>Shopping List</h1>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button onClick={copyList} style={smallBtn}>📋 Copy list</button>
+          <button onClick={resetAll} style={smallBtn}>Reset all</button>
+        </div>
+      </div>
+
+      {/* Search bar */}
+      <div style={{ position: "relative", marginBottom: 20, maxWidth: 720 }}>
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search items…"
+          style={{ width: "100%", boxSizing: "border-box", padding: "10px 36px 10px 14px", background: "#faf7f2", border: "1.5px solid #e8e0d4", borderRadius: 10, fontSize: 14, color: "#1c1915", fontFamily: "'DM Sans', sans-serif", outline: "none" }}
+        />
+        {search && (
+          <button onClick={() => setSearch("")} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#8a7f72", fontSize: 18, cursor: "pointer", padding: 0, lineHeight: 1 }}>×</button>
+        )}
+      </div>
+
+      {/* Body */}
+      {allItems.length === 0 ? (
+        <div style={{ color: "#8a7f72", fontSize: 14, textAlign: "center", paddingTop: 60 }}>Add meals to your planner to generate a shopping list.</div>
+      ) : (
+        <>
+          {/* Category sections */}
+          {grouped.map(({ cat, items }) => (
+            <div key={cat.id} style={{ maxWidth: 720, marginBottom: 4 }}>
+              <button style={sectionHeaderStyle} onClick={() => toggleCollapse(cat.id)}>
+                <span>{cat.icon} {cat.name} <span style={{ color: "#c0b8ac", fontWeight: 400 }}>· {items.length} item{items.length !== 1 ? "s" : ""}</span></span>
+                <span style={{ fontSize: 10, color: "#c0b8ac" }}>{collapsed.has(cat.id) ? "▸" : "▾"}</span>
+              </button>
+              {!collapsed.has(cat.id) && (
+                <div style={{ paddingBottom: 8 }}>
+                  {items.map(item => (
+                    <ShoppingItem key={item.key} item={item} checked={false} onToggle={() => toggleCheck(item.key)} onDelete={() => deleteItem(item)} onAdjustQty={d => adjustQty(item, d)} search={search} />
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+
+          {/* No search results */}
+          {search && filteredActive.length === 0 && (
+            <div style={{ color: "#8a7f72", fontSize: 14, textAlign: "center", padding: "40px 0" }}>No items match "{search}"</div>
+          )}
+
+          {/* Completed section */}
+          {doneItems.length > 0 && (
+            <div style={{ maxWidth: 720, marginTop: 16 }}>
+              <div style={{ height: 1, background: "#e8e0d4", marginBottom: 12 }} />
+              <button style={sectionHeaderStyle} onClick={() => setCompletedCollapsed(c => !c)}>
+                <span>✓ Completed <span style={{ color: "#c0b8ac", fontWeight: 400 }}>· {doneItems.length}</span></span>
+                <span style={{ fontSize: 10, color: "#c0b8ac" }}>{completedCollapsed ? "▸" : "▾"}</span>
+              </button>
+              {!completedCollapsed && (
+                <div style={{ paddingBottom: 8 }}>
+                  {doneItems.map(item => (
+                    <ShoppingItem key={item.key} item={item} checked={true} onToggle={() => toggleCheck(item.key)} onDelete={() => deleteItem(item)} onAdjustQty={d => adjustQty(item, d)} search="" />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Add item */}
+          <div style={{ maxWidth: 720, marginTop: 24 }}>
+            {addExpanded ? (
+              <div style={{ background: "#faf7f2", border: "1.5px solid #e8e0d4", borderRadius: 10, padding: "12px 14px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <input
+                  ref={addInputRef}
+                  value={addText}
+                  onChange={e => setAddText(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") addManualItem(); if (e.key === "Escape") { setAddExpanded(false); setAddText(""); } }}
+                  placeholder="e.g. 2 cups almond milk"
+                  autoFocus
+                  style={{ flex: "1 1 180px", padding: "7px 10px", background: "#fff", border: "1px solid #d4c9b8", borderRadius: 7, fontSize: 13, color: "#1c1915", fontFamily: "'DM Sans', sans-serif", outline: "none" }}
+                />
+                <div style={{ fontSize: 11, color: "#8a7f72", padding: "4px 6px", background: "#f0ebe2", borderRadius: 6, whiteSpace: "nowrap" }}>
+                  {detectCategory(addText).icon} {detectCategory(addText).name}
+                </div>
+                <button onClick={addManualItem} style={{ background: "#1c1915", color: "#f5f0e8", border: "none", borderRadius: 7, padding: "7px 16px", fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>Add</button>
+                <button onClick={() => { setAddExpanded(false); setAddText(""); }} style={{ ...smallBtn, border: "none", padding: "7px 10px" }}>Cancel</button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setAddExpanded(true)}
+                style={{ width: "100%", background: "none", border: "2px dashed #d4c9b8", borderRadius: 10, padding: "12px", fontSize: 13, color: "#8a7f72", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", textAlign: "left" }}
+              >+ Add item manually</button>
+            )}
+          </div>
+
+          {/* Footer summary */}
+          <div style={{ marginTop: 20, padding: "14px 18px", background: "#faf7f2", border: "1px solid #e8e0d4", borderRadius: 10, fontSize: 12, color: "#8a7f72", maxWidth: 720 }}>
+            📋 {visibleItems.length} items · {doneItems.length} checked off · Based on your current week's meal plan
+          </div>
+        </>
+      )}
+
+      {/* Copy toast */}
+      {toast?.type === "copy" && (
+        <div style={{ position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)", background: "#2c2820", color: "#f5f0e8", borderRadius: 8, padding: "10px 22px", fontSize: 14, fontWeight: 500, zIndex: 999, boxShadow: "0 4px 20px rgba(0,0,0,0.3)", pointerEvents: "none" }}>
+          ✓ Copied!
+        </div>
+      )}
+      {/* Undo toast */}
+      {toast?.type === "undo" && (
+        <div style={{ position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)", background: "#2c2820", color: "#f5f0e8", borderRadius: 8, padding: "10px 16px", fontSize: 14, display: "flex", alignItems: "center", gap: 16, zIndex: 999, boxShadow: "0 4px 20px rgba(0,0,0,0.3)", whiteSpace: "nowrap" }}>
+          <span>Item removed</span>
+          <button onClick={undoDelete} style={{ background: "#e8a030", color: "#1c1915", border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>Undo</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 export default function MealPlannerApp() {
@@ -1027,7 +1478,6 @@ export default function MealPlannerApp() {
 
   const plan = plans[weekOffset] ?? EMPTY_PLAN;
 
-  const shoppingList = generateShoppingList(plan, recipes);
   const totalWeekCalories = Object.keys(plan).reduce((sum, day) => sum + getDayCalories(plan[day], recipes), 0);
   const avgDailyCalories = Math.round(totalWeekCalories / 7);
 
@@ -1696,77 +2146,13 @@ export default function MealPlannerApp() {
 
                 {/* ── SHOPPING LIST ── */}
                 {activeTab === "shopping" && (
-                  <div className="fade-in">
-                    <div style={{ marginBottom: 24, display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-                      <h1 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 36, fontWeight: 600, margin: 0 }}>
-                        Shopping List
-                      </h1>
-                      <button
-                        onClick={() => setCheckedItems({})}
-                        style={{
-                          background: "none", border: "1px solid #d4c9b8", borderRadius: 8,
-                          padding: "6px 14px", fontSize: 12, color: "#8a7f72", cursor: "pointer",
-                          fontFamily: "'DM Sans', sans-serif"
-                        }}
-                      >Reset all</button>
-                    </div>
-
-                    {shoppingList.length === 0 ? (
-                      <div style={{ color: "#8a7f72", fontSize: 14, textAlign: "center", paddingTop: 60 }}>
-                        Add meals to your planner to generate a shopping list.
-                      </div>
-                    ) : (
-                      <>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, maxWidth: 720 }}>
-                          {shoppingList.map(([ingredient, count]) => {
-                            const checked = !!checkedItems[ingredient];
-                            return (
-                              <div
-                                key={ingredient}
-                                className={`check-item ${checked ? "checked" : ""}`}
-                                onClick={() => setCheckedItems(c => ({ ...c, [ingredient]: !c[ingredient] }))}
-                                style={{
-                                  background: checked ? "#f0ebe2" : "#faf7f2",
-                                  border: `1.5px solid ${checked ? "#d4c9b8" : "#e8e0d4"}`,
-                                  borderRadius: 10, padding: "12px 16px", cursor: "pointer",
-                                  display: "flex", alignItems: "center", gap: 12,
-                                }}
-                              >
-                                <div style={{
-                                  width: 20, height: 20, borderRadius: 5,
-                                  border: `2px solid ${checked ? "#4a7c59" : "#c8bfb0"}`,
-                                  background: checked ? "#4a7c59" : "transparent",
-                                  display: "flex", alignItems: "center", justifyContent: "center",
-                                  flexShrink: 0, transition: "all 0.15s"
-                                }}>
-                                  {checked && <span style={{ color: "white", fontSize: 12, lineHeight: 1 }}>✓</span>}
-                                </div>
-                                <div style={{ flex: 1 }}>
-                                  <div style={{
-                                    fontSize: 13, fontWeight: 400, color: "#1c1915",
-                                    textDecoration: checked ? "line-through" : "none",
-                                    textDecorationColor: "#8a7f72"
-                                  }}>
-                                    {ingredient}
-                                  </div>
-                                  {count > 1 && (
-                                    <div style={{ fontSize: 10, color: "#8a7f72", marginTop: 1 }}>used in {count} meals</div>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <div style={{
-                          marginTop: 20, padding: "14px 18px",
-                          background: "#faf7f2", border: "1px solid #e8e0d4",
-                          borderRadius: 10, fontSize: 12, color: "#8a7f72", maxWidth: 720
-                        }}>
-                          📋 {shoppingList.length} items · {Object.values(checkedItems).filter(Boolean).length} checked off · Based on your current week's meal plan
-                        </div>
-                      </>
-                    )}
-                  </div>
+                  <ShoppingListTab
+                    plan={plan}
+                    recipes={recipes}
+                    recipeEdits={recipeEdits}
+                    checkedItems={checkedItems}
+                    onSetCheckedItems={setCheckedItems}
+                  />
                 )}
 
                 {/* ── CALORIES ── */}
