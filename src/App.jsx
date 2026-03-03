@@ -95,7 +95,7 @@ function getQtyStep(value) {
   return 1;
 }
 
-function generateShoppingItems(plan, recipes, recipeEdits, manualItems, qtyOverrides) {
+function generateShoppingItems(plan, recipes, recipeEdits, manualItems, qtyOverrides, servingOverrides = {}) {
   const itemMap = {};
   DAYS.forEach(day => {
     MEALS.forEach(meal => {
@@ -103,22 +103,31 @@ function generateShoppingItems(plan, recipes, recipeEdits, manualItems, qtyOverr
       if (!id) return;
       const r = recipes.find(rec => rec.id === id);
       if (!r) return;
+      const baseServings = parseServings(r.yield);
+      const targetServings = servingOverrides[id] ?? baseServings;
+      const ratio = baseServings > 0 ? targetServings / baseServings : 1;
       const ings = recipeEdits[id]?.ingredients ?? r.ingredients ?? [];
       ings.forEach(ing => {
         const key = ing.toLowerCase().trim();
-        if (!itemMap[key]) itemMap[key] = { key, origText: ing, count: 0, isManual: false };
+        if (!itemMap[key]) {
+          // Scale the text for this ingredient based on servings ratio
+          const scaledText = scaleIngredient(ing, ratio);
+          itemMap[key] = { key, origText: ing, scaledText, count: 0, isManual: false };
+        }
         itemMap[key].count++;
       });
     });
   });
   const planItems = Object.values(itemMap).map(it => ({
     ...it,
-    text: qtyOverrides[it.key] ?? it.origText,
+    // qtyOverrides (manual +/-) take precedence over serving-scaled text
+    text: qtyOverrides[it.key] ?? it.scaledText,
     category: detectCategory(it.origText),
   }));
   const manualFormatted = (manualItems || []).map(mi => ({
     key: mi.id,
     origText: mi.text,
+    scaledText: mi.text,
     text: qtyOverrides[mi.id] ?? mi.text,
     count: 1,
     isManual: true,
@@ -1199,6 +1208,7 @@ function ShoppingListTab({ plan, recipes, recipeEdits, checkedItems, onSetChecke
   const [manualItems, setManualItems] = useState([]);
   const [qtyOverrides, setQtyOverrides] = useState({});
   const [hidden, setHidden] = useState(new Set());
+  const [servingOverrides, setServingOverrides] = useState({});
   const [toast, setToast] = useState(null); // { type:"copy"|"undo", text? }
   const [addText, setAddText] = useState("");
   const [addExpanded, setAddExpanded] = useState(false);
@@ -1213,6 +1223,7 @@ function ShoppingListTab({ plan, recipes, recipeEdits, checkedItems, onSetChecke
       const m = localStorage.getItem("mealplanner_manual_items"); if (m) setManualItems(JSON.parse(m));
       const q = localStorage.getItem("mealplanner_qty_overrides"); if (q) setQtyOverrides(JSON.parse(q));
       const h = localStorage.getItem("mealplanner_hidden_items"); if (h) setHidden(new Set(JSON.parse(h)));
+      const s = localStorage.getItem("mealplanner_serving_overrides"); if (s) setServingOverrides(JSON.parse(s));
     } catch {}
     // iOS install banner
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.navigator.standalone;
@@ -1225,10 +1236,37 @@ function ShoppingListTab({ plan, recipes, recipeEdits, checkedItems, onSetChecke
   useEffect(() => { localStorage.setItem("mealplanner_manual_items", JSON.stringify(manualItems)); }, [manualItems]);
   useEffect(() => { localStorage.setItem("mealplanner_qty_overrides", JSON.stringify(qtyOverrides)); }, [qtyOverrides]);
   useEffect(() => { localStorage.setItem("mealplanner_hidden_items", JSON.stringify([...hidden])); }, [hidden]);
+  useEffect(() => { localStorage.setItem("mealplanner_serving_overrides", JSON.stringify(servingOverrides)); }, [servingOverrides]);
+
+  // Unique recipes planned this week with their serving counts
+  const weekRecipes = useMemo(() => {
+    const seen = new Set();
+    const result = [];
+    DAYS.forEach(day => {
+      MEALS.forEach(meal => {
+        const recipeId = plan[day]?.[meal];
+        if (!recipeId || seen.has(recipeId)) return;
+        seen.add(recipeId);
+        const recipe = recipes.find(r => r.id === recipeId);
+        if (!recipe) return;
+        const baseServings = parseServings(recipe.yield);
+        const servings = servingOverrides[recipeId] ?? baseServings;
+        const effectiveTitle = recipeEdits[recipeId]?.title ?? recipe.title;
+        result.push({ recipe, baseServings, servings, effectiveTitle });
+      });
+    });
+    return result;
+  }, [plan, recipes, recipeEdits, servingOverrides]);
+
+  function setServings(recipeId, value) {
+    setServingOverrides(s => ({ ...s, [recipeId]: Math.max(1, value) }));
+    // Clear any manual qty overrides since scaling has changed
+    setQtyOverrides({});
+  }
 
   const allItems = useMemo(
-    () => generateShoppingItems(plan, recipes, recipeEdits, manualItems, qtyOverrides),
-    [plan, recipes, recipeEdits, manualItems, qtyOverrides]
+    () => generateShoppingItems(plan, recipes, recipeEdits, manualItems, qtyOverrides, servingOverrides),
+    [plan, recipes, recipeEdits, manualItems, qtyOverrides, servingOverrides]
   );
 
   const visibleItems = useMemo(() => allItems.filter(it => !hidden.has(it.key)), [allItems, hidden]);
@@ -1313,9 +1351,11 @@ function ShoppingListTab({ plan, recipes, recipeEdits, checkedItems, onSetChecke
     setHidden(new Set());
     setManualItems([]);
     setQtyOverrides({});
+    setServingOverrides({});
     localStorage.removeItem("mealplanner_manual_items");
     localStorage.removeItem("mealplanner_qty_overrides");
     localStorage.removeItem("mealplanner_hidden_items");
+    localStorage.removeItem("mealplanner_serving_overrides");
   }
 
   function toggleCollapse(catId) {
@@ -1356,6 +1396,44 @@ function ShoppingListTab({ plan, recipes, recipeEdits, checkedItems, onSetChecke
           <button onClick={() => setSearch("")} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#8a7f72", fontSize: 18, cursor: "pointer", padding: 0, lineHeight: 1 }}>×</button>
         )}
       </div>
+
+      {/* Recipes this week + serving controls */}
+      {weekRecipes.length > 0 && (
+        <div style={{ maxWidth: 720, marginBottom: 28 }}>
+          <div style={{ fontSize: 11, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, marginBottom: 10 }}>
+            Recipes this week
+          </div>
+          {weekRecipes.map(({ recipe, baseServings, servings, effectiveTitle }) => (
+            <div key={recipe.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, background: "#faf7f2", border: "1.5px solid #e8e0d4", borderRadius: 10, padding: "11px 16px", marginBottom: 8, flexWrap: "wrap" }}>
+              {/* Recipe name */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: "#1c1915", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{effectiveTitle}</div>
+                <div style={{ fontSize: 10, color: "#8a7f72", marginTop: 2 }}>base recipe: {baseServings} serving{baseServings !== 1 ? "s" : ""}</div>
+              </div>
+              {/* Serving stepper */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                <span style={{ fontSize: 10, color: "#8a7f72", letterSpacing: "0.04em" }}>servings to cook</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <button
+                    onClick={() => setServings(recipe.id, servings - 1)}
+                    style={{ width: 26, height: 26, borderRadius: "50%", border: "1.5px solid #d4c9b8", background: "#fff", cursor: servings <= 1 ? "default" : "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", color: servings <= 1 ? "#d4c9b8" : "#8a7f72", padding: 0, lineHeight: 1, fontFamily: "inherit" }}
+                    disabled={servings <= 1}
+                  >−</button>
+                  <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, fontWeight: 600, color: "#1c1915", minWidth: 28, textAlign: "center", lineHeight: 1 }}>{servings}</span>
+                  <button
+                    onClick={() => setServings(recipe.id, servings + 1)}
+                    style={{ width: 26, height: 26, borderRadius: "50%", border: "1.5px solid #d4c9b8", background: "#fff", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", color: "#8a7f72", padding: 0, lineHeight: 1, fontFamily: "inherit" }}
+                  >+</button>
+                </div>
+                {servings !== baseServings && (
+                  <button onClick={() => setServings(recipe.id, baseServings)} style={{ fontSize: 10, color: "#8a7f72", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline", fontFamily: "'DM Sans', sans-serif" }}>reset</button>
+                )}
+              </div>
+            </div>
+          ))}
+          <div style={{ height: 1, background: "#e8e0d4", marginTop: 8 }} />
+        </div>
+      )}
 
       {/* Body */}
       {allItems.length === 0 ? (
