@@ -362,7 +362,7 @@ function scaleIngredient(ing, ratio) {
 
 // ─── Recipe Detail Modal ──────────────────────────────────────────────────────
 
-function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalories, edits, onSaveEdits }) {
+function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalories, edits, onSaveEdits, onDelete }) {
   useEffect(() => {
     function handleKey(e) { if (e.key === "Escape") onClose(); }
     window.addEventListener("keydown", handleKey);
@@ -532,14 +532,30 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
               </h1>
             )}
             {!editMode ? (
-              <button
-                onClick={enterEditMode}
-                style={{
-                  background: "none", border: "1px solid #d4c9b8", borderRadius: 8,
-                  padding: "6px 14px", fontSize: 12, color: "#8a7f72", cursor: "pointer",
-                  fontFamily: "'DM Sans', sans-serif", flexShrink: 0, marginTop: 6,
-                }}
-              >✏️ Edit Recipe</button>
+              <div style={{ display: "flex", gap: 8, flexShrink: 0, marginTop: 6 }}>
+                <button
+                  onClick={enterEditMode}
+                  style={{
+                    background: "none", border: "1px solid #d4c9b8", borderRadius: 8,
+                    padding: "6px 14px", fontSize: 12, color: "#8a7f72", cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >✏️ Edit Recipe</button>
+                {recipe.isCustom && onDelete && (
+                  <button
+                    onClick={() => {
+                      if (window.confirm(`Delete "${effectiveTitle}"? This cannot be undone.`)) {
+                        onDelete();
+                      }
+                    }}
+                    style={{
+                      background: "none", border: "1px solid #f5c0c0", borderRadius: 8,
+                      padding: "6px 14px", fontSize: 12, color: "#c94040", cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >🗑 Delete</button>
+                )}
+              </div>
             ) : (
               <div style={{ display: "flex", gap: 8, flexShrink: 0, marginTop: 6 }}>
                 <button
@@ -561,6 +577,11 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
               </div>
             )}
           </div>
+          {recipe.isCustom && (
+            <div style={{ fontSize: 12, color: "#6aaa7e", marginBottom: 8, fontWeight: 500 }}>
+              ✦ My Recipe
+            </div>
+          )}
           {recipe.author && (
             <div style={{ fontSize: 13, color: "#8a7f72", marginBottom: 14 }}>
               By {recipe.author}
@@ -1537,6 +1558,164 @@ function ShoppingListTab({ plan, recipes, recipeEdits, checkedItems, onSetChecke
   );
 }
 
+// ─── Create Recipe Modal ──────────────────────────────────────────────────────
+
+function CreateRecipeModal({ onSave, onClose }) {
+  const [title, setTitle] = useState("");
+  const [yieldText, setYieldText] = useState("4 servings");
+  const [totalTime, setTotalTime] = useState("");
+  const [ingredientsText, setIngredientsText] = useState("");
+  const [instructionsText, setInstructionsText] = useState("");
+
+  useEffect(() => {
+    function handleKey(e) { if (e.key === "Escape") onClose(); }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  function handleSave() {
+    if (!title.trim()) return;
+    const ingredients = ingredientsText.split("\n").map(l => l.trim()).filter(Boolean);
+    const instructions = instructionsText.split("\n").map(l => l.trim()).filter(Boolean);
+    const id = "custom_" + Date.now();
+    onSave({
+      id,
+      title: title.trim(),
+      isCustom: true,
+      yield: yieldText.trim() || "4 servings",
+      times: totalTime.trim() ? { "total time": totalTime.trim() } : {},
+      ingredients,
+      instructions,
+      tags: [],
+      rating: 0,
+      timesCooked: 0,
+    });
+  }
+
+  const inputStyle = {
+    width: "100%", border: "1.5px solid #e8e0d4", borderRadius: 8,
+    padding: "10px 14px", fontSize: 14, fontFamily: "'DM Sans', sans-serif",
+    color: "#1c1915", background: "#fff", outline: "none",
+  };
+  const labelStyle = {
+    display: "block", fontSize: 11, fontWeight: 500, color: "#8a7f72",
+    textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6,
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 200,
+        background: "rgba(0,0,0,0.55)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: "24px 16px", overflowY: "auto",
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "#faf7f2", borderRadius: 14, width: "100%", maxWidth: 620,
+          maxHeight: "90vh", overflowY: "auto",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.35)",
+          padding: "36px 40px",
+          fontFamily: "'DM Sans', 'Segoe UI', sans-serif",
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
+          <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 32, fontWeight: 700, margin: 0, color: "#1c1915" }}>
+            New Recipe
+          </h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, color: "#8a7f72", cursor: "pointer", lineHeight: 1 }}>×</button>
+        </div>
+
+        {/* Title */}
+        <label style={labelStyle}>Recipe Title *</label>
+        <input
+          autoFocus
+          value={title}
+          onChange={e => setTitle(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") e.preventDefault(); }}
+          placeholder="e.g. Roasted Garlic Pasta"
+          style={{ ...inputStyle, fontSize: 15, marginBottom: 18 }}
+        />
+
+        {/* Yield + Time */}
+        <div style={{ display: "flex", gap: 14, marginBottom: 18 }}>
+          <div style={{ flex: 1 }}>
+            <label style={labelStyle}>Servings</label>
+            <input
+              value={yieldText}
+              onChange={e => setYieldText(e.target.value)}
+              placeholder="e.g. 4 servings"
+              style={inputStyle}
+            />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={labelStyle}>Total Time</label>
+            <input
+              value={totalTime}
+              onChange={e => setTotalTime(e.target.value)}
+              placeholder="e.g. 30 minutes"
+              style={inputStyle}
+            />
+          </div>
+        </div>
+
+        {/* Ingredients */}
+        <label style={labelStyle}>
+          Ingredients{" "}
+          <span style={{ fontStyle: "italic", textTransform: "none", fontSize: 11, fontWeight: 400 }}>(one per line)</span>
+        </label>
+        <textarea
+          value={ingredientsText}
+          onChange={e => setIngredientsText(e.target.value)}
+          placeholder={"2 cups all-purpose flour\n1 tsp salt\n3 cloves garlic, minced"}
+          rows={6}
+          style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6, marginBottom: 18 }}
+        />
+
+        {/* Instructions */}
+        <label style={labelStyle}>
+          Instructions{" "}
+          <span style={{ fontStyle: "italic", textTransform: "none", fontSize: 11, fontWeight: 400 }}>(one step per line)</span>
+        </label>
+        <textarea
+          value={instructionsText}
+          onChange={e => setInstructionsText(e.target.value)}
+          placeholder={"Preheat oven to 400°F.\nToss vegetables with olive oil and salt.\nRoast for 25 minutes until golden."}
+          rows={6}
+          style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6, marginBottom: 28 }}
+        />
+
+        {/* Actions */}
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <button
+            onClick={onClose}
+            style={{
+              background: "none", border: "1px solid #d4c9b8", borderRadius: 8,
+              padding: "10px 22px", fontSize: 13, color: "#8a7f72", cursor: "pointer",
+              fontFamily: "'DM Sans', sans-serif",
+            }}
+          >Cancel</button>
+          <button
+            onClick={handleSave}
+            disabled={!title.trim()}
+            style={{
+              background: title.trim() ? "#1c1915" : "#c0b8ac",
+              color: "#f5f0e8", border: "none", borderRadius: 8,
+              padding: "10px 24px", fontSize: 13, fontWeight: 500,
+              cursor: title.trim() ? "pointer" : "default",
+              fontFamily: "'DM Sans', sans-serif",
+            }}
+          >Save Recipe</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 export default function MealPlannerApp() {
@@ -1553,6 +1732,7 @@ export default function MealPlannerApp() {
   const [recipeSearch, setRecipeSearch] = useState("");
   const [recipeSort, setRecipeSort] = useState("default");
   const [recipeEdits, setRecipeEdits] = useState({});
+  const [showCreateRecipe, setShowCreateRecipe] = useState(false);
 
   // Auth state
   const [token, setToken] = useState(null);
@@ -1597,8 +1777,11 @@ export default function MealPlannerApp() {
         if (data.checkedItems) setCheckedItems(data.checkedItems);
         if (data.calorieGoal) setCalorieGoal(data.calorieGoal);
       }
-      const cachedRecipes = localStorage.getItem("mealplanner_recipes");
-      if (cachedRecipes) setRecipes(JSON.parse(cachedRecipes));
+      const cachedDrive = localStorage.getItem("mealplanner_recipes");
+      const cachedCustom = localStorage.getItem("mealplanner_custom_recipes");
+      const driveRecipes = cachedDrive ? JSON.parse(cachedDrive) : [];
+      const customRecipes = cachedCustom ? JSON.parse(cachedCustom) : [];
+      if (driveRecipes.length || customRecipes.length) setRecipes([...customRecipes, ...driveRecipes]);
       const lastSync = localStorage.getItem("mealplanner_last_sync");
       if (lastSync) setLastSyncTime(lastSync);
       const savedEdits = localStorage.getItem("mealplanner_recipe_edits");
@@ -1634,7 +1817,9 @@ export default function MealPlannerApp() {
     setDriveError(null);
     try {
       const data = await fetchRecipesFromDrive(accessToken);
-      setRecipes(data);
+      // Preserve custom recipes through Drive sync
+      const customRecipes = JSON.parse(localStorage.getItem("mealplanner_custom_recipes") || "[]");
+      setRecipes([...customRecipes, ...data]);
       localStorage.setItem("mealplanner_recipes", JSON.stringify(data));
       const now = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
       localStorage.setItem("mealplanner_last_sync", now);
@@ -1665,7 +1850,9 @@ export default function MealPlannerApp() {
           r.id === recipe.id ? { ...r, caloriesPerServing: data.caloriesPerServing, calorieReasoning: data.calorieReasoning || "" } : r
         );
         setRecipes(updated);
-        localStorage.setItem("mealplanner_recipes", JSON.stringify(updated));
+        // Persist Drive and custom recipes separately
+        localStorage.setItem("mealplanner_recipes", JSON.stringify(updated.filter(r => !r.isCustom)));
+        localStorage.setItem("mealplanner_custom_recipes", JSON.stringify(updated.filter(r => r.isCustom)));
         return { calories: data.caloriesPerServing, reasoning: data.calorieReasoning || "" };
       }
     } catch (err) {
@@ -1702,6 +1889,21 @@ export default function MealPlannerApp() {
       localStorage.setItem("mealplanner_recipe_edits", JSON.stringify(updated));
       return updated;
     });
+  }
+
+  function createRecipe(recipe) {
+    const existing = JSON.parse(localStorage.getItem("mealplanner_custom_recipes") || "[]");
+    const updated = [recipe, ...existing];
+    localStorage.setItem("mealplanner_custom_recipes", JSON.stringify(updated));
+    setRecipes(prev => [recipe, ...prev]);
+    setShowCreateRecipe(false);
+  }
+
+  function deleteCustomRecipe(id) {
+    const existing = JSON.parse(localStorage.getItem("mealplanner_custom_recipes") || "[]");
+    localStorage.setItem("mealplanner_custom_recipes", JSON.stringify(existing.filter(r => r.id !== id)));
+    setRecipes(prev => prev.filter(r => r.id !== id));
+    setSelectedRecipe(null);
   }
 
   const tabs = [
@@ -1868,6 +2070,15 @@ export default function MealPlannerApp() {
           }}
           edits={recipeEdits[selectedRecipe.id]}
           onSaveEdits={edits => saveRecipeEdits(selectedRecipe.id, edits)}
+          onDelete={selectedRecipe.isCustom ? () => deleteCustomRecipe(selectedRecipe.id) : undefined}
+        />
+      )}
+
+      {/* Create Recipe Modal */}
+      {showCreateRecipe && (
+        <CreateRecipeModal
+          onSave={createRecipe}
+          onClose={() => setShowCreateRecipe(false)}
         />
       )}
 
@@ -1905,19 +2116,31 @@ export default function MealPlannerApp() {
                   No recipes yet
                 </div>
                 <div style={{ fontSize: 14, color: "#8a7f72", maxWidth: 340, lineHeight: 1.6 }}>
-                  Use the Chrome extension to save recipes from NYT Cooking, then sync from Drive.
+                  Create your own recipes, or use the Chrome extension to save from NYT Cooking.
                 </div>
-                <button
-                  onClick={syncFromDrive}
-                  style={{
-                    background: "#1c1915", color: "#f5f0e8", border: "none", borderRadius: 10,
-                    padding: "10px 22px", fontSize: 14, fontWeight: 500, cursor: "pointer",
-                    display: "flex", alignItems: "center", gap: 8, fontFamily: "'DM Sans', sans-serif",
-                  }}
-                >
-                  <img src="https://www.google.com/favicon.ico" width={14} height={14} alt="" />
-                  Sync from Drive
-                </button>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button
+                    onClick={() => setShowCreateRecipe(true)}
+                    style={{
+                      background: "#1c1915", color: "#f5f0e8", border: "none", borderRadius: 10,
+                      padding: "10px 22px", fontSize: 14, fontWeight: 500, cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    + New Recipe
+                  </button>
+                  <button
+                    onClick={syncFromDrive}
+                    style={{
+                      background: "#fff", color: "#1c1915", border: "1.5px solid #e8e0d4", borderRadius: 10,
+                      padding: "10px 22px", fontSize: 14, fontWeight: 500, cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 8, fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    <img src="https://www.google.com/favicon.ico" width={14} height={14} alt="" />
+                    Sync from Drive
+                  </button>
+                </div>
               </div>
             )}
 
@@ -2089,6 +2312,18 @@ export default function MealPlannerApp() {
                       <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
                         {lastSyncTime && <span style={{ fontSize: 11, color: "#c0b8ac" }}>Last synced: {lastSyncTime}</span>}
                         <button
+                          onClick={() => setShowCreateRecipe(true)}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 6,
+                            background: "#1c1915", border: "none", borderRadius: 8,
+                            padding: "7px 14px", fontSize: 12, color: "#f5f0e8",
+                            cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                            fontWeight: 500,
+                          }}
+                        >
+                          + New Recipe
+                        </button>
+                        <button
                           onClick={syncFromDrive}
                           disabled={loadingRecipes}
                           style={{
@@ -2181,6 +2416,16 @@ export default function MealPlannerApp() {
                             <div style={{ marginTop: 6 }}>
                               <StarRating rating={recipe.rating} onChange={r => updateRating(recipe.id, r)} />
                             </div>
+                            {recipe.isCustom && (
+                              <div style={{
+                                position: "absolute", top: 12, left: 12,
+                                background: "rgba(74,124,89,0.25)", border: "1px solid rgba(74,124,89,0.5)",
+                                borderRadius: 20, padding: "3px 10px",
+                                fontSize: 10, color: "#6aaa7e", fontWeight: 500
+                              }}>
+                                ✦ My Recipe
+                              </div>
+                            )}
                             {recipe.caloriesPerServing && (
                               <div style={{
                                 position: "absolute", top: 12, right: 12,
