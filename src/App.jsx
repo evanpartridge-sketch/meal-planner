@@ -1817,10 +1817,24 @@ export default function MealPlannerApp() {
     setDriveError(null);
     try {
       const data = await fetchRecipesFromDrive(accessToken);
-      // Preserve custom recipes through Drive sync
+      // Preserve calorie estimates, ratings, and timesCooked across Drive sync
+      // (Drive files don't carry this data — it lives only in localStorage)
+      const existingCached = JSON.parse(localStorage.getItem("mealplanner_recipes") || "[]");
+      const preserved = {};
+      existingCached.forEach(r => {
+        if (r.caloriesPerServing || r.calorieReasoning || r.rating || r.timesCooked) {
+          preserved[r.id] = {
+            ...(r.caloriesPerServing  && { caloriesPerServing:  r.caloriesPerServing }),
+            ...(r.calorieReasoning   && { calorieReasoning:    r.calorieReasoning }),
+            ...(r.rating             && { rating:              r.rating }),
+            ...(r.timesCooked        && { timesCooked:         r.timesCooked }),
+          };
+        }
+      });
+      const mergedData = data.map(r => preserved[r.id] ? { ...r, ...preserved[r.id] } : r);
       const customRecipes = JSON.parse(localStorage.getItem("mealplanner_custom_recipes") || "[]");
-      setRecipes([...customRecipes, ...data]);
-      localStorage.setItem("mealplanner_recipes", JSON.stringify(data));
+      setRecipes([...customRecipes, ...mergedData]);
+      localStorage.setItem("mealplanner_recipes", JSON.stringify(mergedData));
       const now = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
       localStorage.setItem("mealplanner_last_sync", now);
       setLastSyncTime(now);
@@ -1846,13 +1860,15 @@ export default function MealPlannerApp() {
       });
       const data = await res.json();
       if (data.caloriesPerServing) {
-        const updated = recipes.map(r =>
-          r.id === recipe.id ? { ...r, caloriesPerServing: data.caloriesPerServing, calorieReasoning: data.calorieReasoning || "" } : r
-        );
-        setRecipes(updated);
-        // Persist Drive and custom recipes separately
-        localStorage.setItem("mealplanner_recipes", JSON.stringify(updated.filter(r => !r.isCustom)));
-        localStorage.setItem("mealplanner_custom_recipes", JSON.stringify(updated.filter(r => r.isCustom)));
+        // Use functional setState to avoid the stale-closure problem with async functions
+        setRecipes(prev => {
+          const updated = prev.map(r =>
+            r.id === recipe.id ? { ...r, caloriesPerServing: data.caloriesPerServing, calorieReasoning: data.calorieReasoning || "" } : r
+          );
+          localStorage.setItem("mealplanner_recipes", JSON.stringify(updated.filter(r => !r.isCustom)));
+          localStorage.setItem("mealplanner_custom_recipes", JSON.stringify(updated.filter(r => r.isCustom)));
+          return updated;
+        });
         return { calories: data.caloriesPerServing, reasoning: data.calorieReasoning || "" };
       }
     } catch (err) {
@@ -1876,11 +1892,21 @@ export default function MealPlannerApp() {
   }
 
   function updateRating(id, rating) {
-    setRecipes(rs => rs.map(r => r.id === id ? { ...r, rating } : r));
+    setRecipes(rs => {
+      const updated = rs.map(r => r.id === id ? { ...r, rating } : r);
+      localStorage.setItem("mealplanner_recipes", JSON.stringify(updated.filter(r => !r.isCustom)));
+      localStorage.setItem("mealplanner_custom_recipes", JSON.stringify(updated.filter(r => r.isCustom)));
+      return updated;
+    });
   }
 
   function markCooked(id) {
-    setRecipes(rs => rs.map(r => r.id === id ? { ...r, timesCooked: (r.timesCooked || 0) + 1 } : r));
+    setRecipes(rs => {
+      const updated = rs.map(r => r.id === id ? { ...r, timesCooked: (r.timesCooked || 0) + 1 } : r);
+      localStorage.setItem("mealplanner_recipes", JSON.stringify(updated.filter(r => !r.isCustom)));
+      localStorage.setItem("mealplanner_custom_recipes", JSON.stringify(updated.filter(r => r.isCustom)));
+      return updated;
+    });
   }
 
   function saveRecipeEdits(recipeId, edits) {
