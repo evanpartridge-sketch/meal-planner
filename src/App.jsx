@@ -2649,7 +2649,7 @@ export default function MealPlannerApp() {
                             ) : (
                               <div style={{ fontSize: 36, marginBottom: 8 }}>{recipeEmoji(recipe.id)}</div>
                             )}
-                            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, fontWeight: 600, color: "#f5f0e8", lineHeight: 1.3 }}>
+                            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, fontWeight: 600, color: "#f5f0e8", lineHeight: 1.3, minHeight: "2.6em" }}>
                               {recipeEdits[recipe.id]?.title ?? recipe.title}
                             </div>
                             <div style={{ marginTop: 6 }}>
