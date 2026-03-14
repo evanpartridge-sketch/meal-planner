@@ -2583,9 +2583,42 @@ export default function MealPlannerApp() {
                         >
                           <div style={{
                             background: "linear-gradient(135deg, #2a2420 0%, #3d3128 100%)",
-                            padding: "20px 20px 16px",
-                            position: "relative"
+                            padding: "10px 12px 16px",
                           }}>
+                            {/* Badge row — sits in the dark area above the image */}
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", minHeight: 26, marginBottom: 8 }}>
+                              <div>
+                                {recipe.isCustom && (
+                                  <div style={{
+                                    background: "rgba(74,124,89,0.25)", border: "1px solid rgba(74,124,89,0.5)",
+                                    borderRadius: 20, padding: "3px 10px",
+                                    fontSize: 10, color: "#6aaa7e", fontWeight: 500, display: "inline-block"
+                                  }}>
+                                    ✦ My Recipe
+                                  </div>
+                                )}
+                              </div>
+                              <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                                {recipe.abbeyApproved === true && (
+                                  <div style={{
+                                    background: "rgba(74,124,89,0.25)", border: "1px solid rgba(74,124,89,0.5)",
+                                    borderRadius: 20, padding: "3px 10px",
+                                    fontSize: 10, color: "#e8f5ee", fontWeight: 500
+                                  }}>
+                                    🌿 Abby Approved
+                                  </div>
+                                )}
+                                {recipe.caloriesPerServing && (
+                                  <div style={{
+                                    background: "rgba(200,160,60,0.2)", border: "1px solid rgba(200,160,60,0.4)",
+                                    borderRadius: 20, padding: "3px 10px",
+                                    fontSize: 11, color: "#f5dfa0", fontWeight: 500
+                                  }}>
+                                    {recipe.caloriesPerServing} cal
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                             {recipe.image ? (
                               <img src={recipe.image} alt={recipe.title} style={{
                                 width: "100%", height: 120, objectFit: "cover",
@@ -2599,36 +2632,6 @@ export default function MealPlannerApp() {
                             </div>
                             <div style={{ marginTop: 6 }}>
                               <StarRating rating={recipe.rating} onChange={r => updateRating(recipe.id, r)} />
-                            </div>
-                            {recipe.isCustom && (
-                              <div style={{
-                                position: "absolute", top: 12, left: 12,
-                                background: "rgba(74,124,89,0.25)", border: "1px solid rgba(74,124,89,0.5)",
-                                borderRadius: 20, padding: "3px 10px",
-                                fontSize: 10, color: "#6aaa7e", fontWeight: 500
-                              }}>
-                                ✦ My Recipe
-                              </div>
-                            )}
-                            <div style={{ position: "absolute", top: 12, right: 12, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5 }}>
-                              {recipe.abbeyApproved === true && (
-                                <div style={{
-                                  background: "rgba(74,124,89,0.25)", border: "1px solid rgba(74,124,89,0.5)",
-                                  borderRadius: 20, padding: "3px 10px",
-                                  fontSize: 10, color: "#e8f5ee", fontWeight: 500
-                                }}>
-                                  🌿 Abby Approved
-                                </div>
-                              )}
-                              {recipe.caloriesPerServing && (
-                                <div style={{
-                                  background: "rgba(200,160,60,0.2)", border: "1px solid rgba(200,160,60,0.4)",
-                                  borderRadius: 20, padding: "3px 10px",
-                                  fontSize: 11, color: "#f5dfa0", fontWeight: 500
-                                }}>
-                                  {recipe.caloriesPerServing} cal
-                                </div>
-                              )}
                             </div>
                           </div>
 
