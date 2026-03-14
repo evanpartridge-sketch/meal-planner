@@ -803,16 +803,19 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
                         <span style={{ fontSize: 15, color: "#1c1915", fontWeight: 500, cursor: recipe.calorieReasoning ? "help" : "default" }}>{recipe.caloriesPerServing} / serving</span>
                         {showCalTooltip && recipe.calorieReasoning && (
                           <div style={{
-                            position: "absolute", bottom: "calc(100% + 8px)", left: 0,
-                            background: "#2c2820", color: "#f5f0e8",
-                            borderRadius: 8, padding: "10px 14px",
-                            fontSize: 12, lineHeight: 1.7,
-                            whiteSpace: "pre-line", width: 260,
-                            maxHeight: 260, overflowY: "auto",
-                            boxShadow: "0 4px 16px rgba(0,0,0,0.25)",
-                            zIndex: 10, pointerEvents: "none",
+                            position: "absolute", bottom: "100%", left: 0,
+                            paddingBottom: 8, zIndex: 10,
                           }}>
-                            {recipe.calorieReasoning}
+                            <div style={{
+                              background: "#2c2820", color: "#f5f0e8",
+                              borderRadius: 8, padding: "10px 14px",
+                              fontSize: 12, lineHeight: 1.7,
+                              whiteSpace: "pre-line", width: 260,
+                              maxHeight: 260, overflowY: "auto",
+                              boxShadow: "0 4px 16px rgba(0,0,0,0.25)",
+                            }}>
+                              {recipe.calorieReasoning}
+                            </div>
                           </div>
                         )}
                       </div>
