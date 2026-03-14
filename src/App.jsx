@@ -484,6 +484,7 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
   const [draftTotalTime, setDraftTotalTime] = useState("");
   const [draftTags, setDraftTags] = useState([]);
   const [newTagInput, setNewTagInput] = useState("");
+  const [draftCalorieLines, setDraftCalorieLines] = useState([]); // [{ label, cal }]
 
   const ratio = origServings > 0 ? servingCount / origServings : 1;
 
@@ -503,6 +504,15 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
     setDraftDescription(effectiveDescription);
     setDraftTotalTime(effectiveTotalTime);
     setDraftTags([...effectiveTags]);
+    const reasoning = edits?.calorieReasoning ?? recipe.calorieReasoning ?? "";
+    setDraftCalorieLines(
+      reasoning.split("\n")
+        .filter(l => l.trim().startsWith("•"))
+        .map(l => {
+          const calMatch = l.match(/:\s*(\d+)\s*cal\s*$/i);
+          return { label: calMatch ? l.slice(0, l.lastIndexOf(":")).trim() : l.trim(), cal: calMatch ? parseInt(calMatch[1], 10) : 0 };
+        })
+    );
     setEditMode(true);
   }
 
@@ -555,6 +565,16 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
       tags: draftTags,
       comments: [...comments, ...autoNotes],
     };
+    if (draftCalorieLines.length > 0) {
+      const calTotal = draftCalorieLines.reduce((s, l) => s + (l.cal || 0), 0);
+      const calServings = parseServings(draftYield.trim() || effectiveYield) || 1;
+      const calPerServing = Math.round(calTotal / calServings);
+      newEdits.caloriesPerServing = calPerServing;
+      newEdits.calorieReasoning = [
+        ...draftCalorieLines.map(l => `${l.label}: ${l.cal} cal`),
+        `Total: ${calTotal} cal ÷ ${calServings} servings = ${calPerServing} / serving`,
+      ].join("\n");
+    }
     onSaveEdits(newEdits);
     setEditMode(false);
   }
@@ -794,7 +814,39 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
                   <div style={{ fontSize: 10, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 500, marginBottom: 3 }}>
                     Calories
                   </div>
-                  {recipe.caloriesPerServing ? (
+                  {editMode && draftCalorieLines.length > 0 ? (() => {
+                    const draftCalorieTotal = draftCalorieLines.reduce((s, l) => s + (l.cal || 0), 0);
+                    const draftServings = parseServings(draftYield || effectiveYield) || 1;
+                    const draftCalPerServing = Math.round(draftCalorieTotal / draftServings);
+                    return (
+                      <div style={{ fontSize: 12, color: "#5a544c" }}>
+                        {draftCalorieLines.map((line, i) => (
+                          <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                            <span style={{ flex: 1, color: "#1c1915" }}>{line.label}:</span>
+                            <input
+                              type="number"
+                              min="0"
+                              value={line.cal}
+                              onChange={e => {
+                                const next = [...draftCalorieLines];
+                                next[i] = { ...next[i], cal: parseInt(e.target.value, 10) || 0 };
+                                setDraftCalorieLines(next);
+                              }}
+                              style={{
+                                width: 60, textAlign: "right", fontSize: 12, padding: "2px 4px",
+                                border: "1px solid #d4c9b8", borderRadius: 4,
+                                fontFamily: "'DM Sans', sans-serif", color: "#1c1915",
+                              }}
+                            />
+                            <span style={{ color: "#8a7f72" }}>cal</span>
+                          </div>
+                        ))}
+                        <div style={{ borderTop: "1px solid #e8e0d4", marginTop: 6, paddingTop: 6, color: "#8a7f72", fontStyle: "italic" }}>
+                          Total: {draftCalorieTotal} ÷ {draftServings} servings = <strong style={{ color: "#1c1915" }}>{draftCalPerServing} / serving</strong>
+                        </div>
+                      </div>
+                    );
+                  })() : recipe.caloriesPerServing ? (
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <div style={{ position: "relative", display: "inline-block" }}
                         onMouseEnter={() => recipe.calorieReasoning && setShowCalTooltip(true)}
