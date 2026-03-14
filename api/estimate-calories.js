@@ -41,6 +41,7 @@ Respond with JSON only, no text outside the JSON object:
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
         max_tokens: 600,
+        temperature: 0,
         messages: [
           { role: "user", content: prompt },
           { role: "assistant", content: "{" },
