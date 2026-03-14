@@ -299,7 +299,8 @@ async function updateRecipeInDrive(token, fileId, recipe) {
 
 async function createRecipeInDrive(token, recipe) {
   const boundary = "mealplanner_boundary";
-  const metadata = JSON.stringify({ name: `${recipe.id}.json`, parents: [DRIVE_FOLDER_ID], mimeType: "application/json" });
+  const safeName = (recipe.title || recipe.id).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 80);
+  const metadata = JSON.stringify({ name: `${safeName}.json`, parents: [DRIVE_FOLDER_ID], mimeType: "application/json" });
   const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(recipe, null, 2)}\r\n--${boundary}--`;
   const res = await fetch(
     "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
