@@ -153,6 +153,32 @@ function generateShoppingList(plan, recipes) {
   return Object.entries(ingredientMap).sort((a, b) => a[0].localeCompare(b[0]));
 }
 
+const ABBY_BLOCKED = [
+  /\beggs?\b/i,
+  /\bmilk\b/i,
+  /\bcheese\b/i,
+  /\bbutter\b/i,
+  /\bcream\b/i,
+  /\byogurt\b/i,
+  /\bwhey\b/i,
+  /\bcasein\b/i,
+  /\blactose\b/i,
+  /\bwheat\b/i,
+  /\bflour\b/i,
+  /\bgluten\b/i,
+  /\bbarley\b/i,
+  /\brye\b/i,
+];
+
+function isAbbyApproved(recipe) {
+  const allText = [
+    ...(recipe.ingredients || []),
+    ...(recipe.tags || []),
+    recipe.title || "",
+  ].join(" ");
+  return !ABBY_BLOCKED.some(re => re.test(allText));
+}
+
 function StarRating({ rating, onChange }) {
   const [hover, setHover] = useState(0);
   return (
@@ -1731,6 +1757,7 @@ export default function MealPlannerApp() {
   const [editingGoal, setEditingGoal] = useState(false);
   const [recipeSearch, setRecipeSearch] = useState("");
   const [recipeSort, setRecipeSort] = useState("default");
+  const [abbeyApproved, setAbbeyApproved] = useState(false);
   const [recipeEdits, setRecipeEdits] = useState({});
   const [showCreateRecipe, setShowCreateRecipe] = useState(false);
 
@@ -2318,6 +2345,7 @@ export default function MealPlannerApp() {
                 {activeTab === "recipes" && (() => {
                   const sortedFiltered = recipes
                     .filter(r => r.title.toLowerCase().includes(recipeSearch.toLowerCase()))
+                    .filter(r => abbeyApproved ? isAbbyApproved(r) : true)
                     .sort((a, b) => {
                       if (recipeSort === "rating") return (b.rating || 0) - (a.rating || 0);
                       if (recipeSort === "cooked") return (b.timesCooked || 0) - (a.timesCooked || 0);
@@ -2401,11 +2429,36 @@ export default function MealPlannerApp() {
                         <option value="cooked">Most Cooked</option>
                         <option value="az">A → Z</option>
                       </select>
+                      <button
+                        onClick={() => setAbbeyApproved(v => !v)}
+                        title="Hide recipes with eggs, dairy, wheat, or gluten"
+                        style={{
+                          background: abbeyApproved ? "#4a7c59" : "transparent",
+                          color: abbeyApproved ? "#fff" : "#4a7c59",
+                          border: "1.5px solid #4a7c59",
+                          borderRadius: 20,
+                          padding: "8px 14px",
+                          fontSize: 12,
+                          fontWeight: 500,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          fontFamily: "'DM Sans', sans-serif",
+                          transition: "all 0.2s",
+                          whiteSpace: "nowrap",
+                          flexShrink: 0,
+                        }}
+                      >
+                        🌿 Abby Approved
+                      </button>
                     </div>
 
                     {sortedFiltered.length === 0 && (
                       <div style={{ color: "#8a7f72", fontSize: 14, textAlign: "center", paddingTop: 60 }}>
-                        No recipes match "{recipeSearch}"
+                        {abbeyApproved && !recipeSearch
+                          ? "No Abby Approved recipes — none of your saved recipes are free of eggs, dairy, wheat, and gluten."
+                          : `No recipes match "${recipeSearch}"`}
                       </div>
                     )}
 
