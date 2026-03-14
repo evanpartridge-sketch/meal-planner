@@ -2615,7 +2615,7 @@ export default function MealPlannerApp() {
                                 <div style={{
                                   background: "rgba(74,124,89,0.25)", border: "1px solid rgba(74,124,89,0.5)",
                                   borderRadius: 20, padding: "3px 10px",
-                                  fontSize: 10, color: "#7ec89a", fontWeight: 500
+                                  fontSize: 10, color: "#e8f5ee", fontWeight: 500
                                 }}>
                                   🌿 Abby Approved
                                 </div>
@@ -2624,7 +2624,7 @@ export default function MealPlannerApp() {
                                 <div style={{
                                   background: "rgba(200,160,60,0.2)", border: "1px solid rgba(200,160,60,0.4)",
                                   borderRadius: 20, padding: "3px 10px",
-                                  fontSize: 11, color: "#c8a03c", fontWeight: 500
+                                  fontSize: 11, color: "#f5dfa0", fontWeight: 500
                                 }}>
                                   {recipe.caloriesPerServing} cal
                                 </div>
