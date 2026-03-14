@@ -201,9 +201,13 @@ function isAbbyApproved(recipe) {
 function parseTotalMinutes(timeStr) {
   if (!timeStr) return null;
   const s = timeStr.toLowerCase();
-  const h = parseInt((/(\d+)\s*hour/.exec(s))?.[1] || "0", 10);
-  const m = parseInt((/(\d+)\s*min/.exec(s))?.[1]  || "0", 10);
-  const total = h * 60 + m;
+  // Handle Unicode fractions (e.g. "1¼ hours", "¾ hour")
+  const fracToMins = { '¼': 15, '½': 30, '¾': 45, '⅓': 20, '⅔': 40 };
+  const hourMatch = /(\d*)(¼|½|¾|⅓|⅔)?\s*hour/.exec(s);
+  const h = parseInt(hourMatch?.[1] || '0', 10);
+  const frac = hourMatch?.[2] ? (fracToMins[hourMatch[2]] || 0) : 0;
+  const m = parseInt((/(\d+)\s*min/.exec(s))?.[1] || '0', 10);
+  const total = h * 60 + m + frac;
   return total > 0 ? total : null;
 }
 
