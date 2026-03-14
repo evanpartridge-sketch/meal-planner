@@ -495,6 +495,8 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
   const effectiveTotalTime = (edits?.times ?? recipe.times)?.["total time"] ?? "";
   const effectiveTags = edits?.tags ?? recipe.tags ?? [];
   const comments = edits?.comments ?? [];
+  const effectiveCaloriesPerServing = edits?.caloriesPerServing ?? recipe.caloriesPerServing;
+  const effectiveCalorieReasoning = edits?.calorieReasoning ?? recipe.calorieReasoning;
 
   function enterEditMode() {
     setDraftTitle(effectiveTitle);
@@ -846,14 +848,14 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
                         </div>
                       </div>
                     );
-                  })() : recipe.caloriesPerServing ? (
+                  })() : effectiveCaloriesPerServing ? (
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <div style={{ position: "relative", display: "inline-block" }}
-                        onMouseEnter={() => recipe.calorieReasoning && setShowCalTooltip(true)}
+                        onMouseEnter={() => effectiveCalorieReasoning && setShowCalTooltip(true)}
                         onMouseLeave={() => setShowCalTooltip(false)}
                       >
-                        <span style={{ fontSize: 15, color: "#1c1915", fontWeight: 500, cursor: recipe.calorieReasoning ? "help" : "default" }}>{recipe.caloriesPerServing} / serving</span>
-                        {showCalTooltip && recipe.calorieReasoning && (
+                        <span style={{ fontSize: 15, color: "#1c1915", fontWeight: 500, cursor: effectiveCalorieReasoning ? "help" : "default" }}>{effectiveCaloriesPerServing} / serving</span>
+                        {showCalTooltip && effectiveCalorieReasoning && (
                           <div style={{
                             position: "absolute", bottom: "100%", left: 0,
                             paddingBottom: 8, zIndex: 10,
@@ -866,7 +868,7 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
                               maxHeight: 260, overflowY: "auto",
                               boxShadow: "0 4px 16px rgba(0,0,0,0.25)",
                             }}>
-                              {recipe.calorieReasoning}
+                              {effectiveCalorieReasoning}
                             </div>
                           </div>
                         )}
