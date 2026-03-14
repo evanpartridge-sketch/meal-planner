@@ -1944,6 +1944,7 @@ export default function MealPlannerApp() {
   // Auth state
   const [token, setToken] = useState(null);
   const [loadingRecipes, setLoadingRecipes] = useState(false);
+  const [syncStatus, setSyncStatus] = useState(null);
   const [driveError, setDriveError] = useState(null);
   const [lastSyncTime, setLastSyncTime] = useState(null);
 
@@ -2026,7 +2027,10 @@ export default function MealPlannerApp() {
 
   async function doSync(accessToken) {
     setLoadingRecipes(true);
+    setSyncStatus(null);
     setDriveError(null);
+
+    let syncedData = null;
     try {
       const pendingEdits = JSON.parse(localStorage.getItem("mealplanner_recipe_edits") || "{}");
       const savedEditsAfterSync = { ...pendingEdits };
@@ -2106,12 +2110,59 @@ export default function MealPlannerApp() {
       const now = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
       localStorage.setItem("mealplanner_last_sync", now);
       setLastSyncTime(now);
+
+      syncedData = { mergedData, driveFileIds };
     } catch (err) {
       setDriveError("Couldn't sync recipes from Drive. Please try again.");
       console.error(err);
     } finally {
       setLoadingRecipes(false);
     }
+
+    // ── 5. Auto-estimate calories for any recipe still missing them ───────────
+    if (!syncedData) return;
+    const { mergedData: syncedRecipes, driveFileIds: syncedFileIds } = syncedData;
+    const needsCalories = syncedRecipes.filter(
+      r => r.caloriesPerServing == null && (r.ingredients?.length || 0) > 0
+    );
+    if (needsCalories.length === 0) return;
+
+    setSyncStatus(`Estimating calories (0/${needsCalories.length})…`);
+    const calUpdates = {};
+    let done = 0;
+    for (const recipe of needsCalories) {
+      try {
+        const res = await fetch("/api/estimate-calories", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ingredients: recipe.ingredients, yield: recipe.yield }),
+        });
+        const data = await res.json();
+        if (data.caloriesPerServing) {
+          calUpdates[recipe.id] = {
+            caloriesPerServing: data.caloriesPerServing,
+            calorieReasoning: data.calorieReasoning || "",
+          };
+          setRecipes(prev => prev.map(r => r.id === recipe.id ? { ...r, ...calUpdates[recipe.id] } : r));
+          const fileId = syncedFileIds[recipe.id];
+          if (fileId) {
+            updateRecipeInDrive(accessToken, fileId, { ...recipe, ...calUpdates[recipe.id] })
+              .catch(e => console.error("Failed to save calories to Drive:", e));
+          }
+        }
+      } catch (e) {
+        console.error("Failed to estimate calories for:", recipe.title, e);
+      }
+      done++;
+      setSyncStatus(`Estimating calories (${done}/${needsCalories.length})…`);
+    }
+
+    // Final localStorage update with all estimated calorie data
+    if (Object.keys(calUpdates).length > 0) {
+      const finalRecipes = syncedRecipes.map(r => calUpdates[r.id] ? { ...r, ...calUpdates[r.id] } : r);
+      localStorage.setItem("mealplanner_recipes", JSON.stringify(finalRecipes));
+    }
+    setSyncStatus(null);
   }
 
   function syncFromDrive() {
@@ -2296,6 +2347,7 @@ export default function MealPlannerApp() {
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #c8bfb0; border-radius: 3px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
         .tab-btn { transition: all 0.2s; }
         .tab-btn:hover { background: rgba(200,160,60,0.12) !important; }
         .recipe-card { transition: transform 0.15s, box-shadow 0.15s; cursor: pointer; }
@@ -2410,6 +2462,18 @@ export default function MealPlannerApp() {
           >↻</button>
         </div>
       </header>
+
+      {/* Calorie estimation progress banner */}
+      {syncStatus && (
+        <div style={{
+          background: "rgba(200,160,60,0.08)", borderBottom: "1px solid rgba(200,160,60,0.2)",
+          padding: "7px 24px", display: "flex", alignItems: "center", gap: 8,
+          fontSize: 12, color: "#c8a03c",
+        }}>
+          <span style={{ display: "inline-block", animation: "spin 1s linear infinite" }}>↻</span>
+          {syncStatus}
+        </div>
+      )}
 
       {/* Recipe Picker Modal */}
       {pickerTarget && (
