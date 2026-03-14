@@ -198,6 +198,15 @@ function isAbbyApproved(recipe) {
   return !ABBY_BLOCKED.some(re => re.test(allText));
 }
 
+function parseTotalMinutes(timeStr) {
+  if (!timeStr) return null;
+  const s = timeStr.toLowerCase();
+  const h = parseInt((/(\d+)\s*hour/.exec(s))?.[1] || "0", 10);
+  const m = parseInt((/(\d+)\s*min/.exec(s))?.[1]  || "0", 10);
+  const total = h * 60 + m;
+  return total > 0 ? total : null;
+}
+
 function StarRating({ rating, onChange }) {
   const [hover, setHover] = useState(0);
   return (
@@ -1819,6 +1828,8 @@ export default function MealPlannerApp() {
   const [recipeSearch, setRecipeSearch] = useState("");
   const [recipeSort, setRecipeSort] = useState("default");
   const [abbeyApproved, setAbbeyApproved] = useState(false);
+  const [cookTimeFilter, setCookTimeFilter] = useState("any"); // "any" | "30" | "60"
+  const [selectedTags, setSelectedTags] = useState([]);        // string[]
   const [recipeEdits, setRecipeEdits] = useState({});
   const [showCreateRecipe, setShowCreateRecipe] = useState(false);
 
@@ -2036,6 +2047,57 @@ export default function MealPlannerApp() {
     }
     return null;
   }
+
+  // ─── Recipe Filter Derived Values ──────────────────────────────────────────
+
+  const topTags = useMemo(() => {
+    const counts = {};
+    recipes.forEach(r => (r.tags || []).forEach(tag => {
+      const t = tag.toLowerCase().trim();
+      if (t) counts[t] = (counts[t] || 0) + 1;
+    }));
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([t]) => t);
+  }, [recipes]);
+
+  const sortedFiltered = useMemo(() => {
+    const q = recipeSearch.toLowerCase();
+    const limit = cookTimeFilter === "30" ? 30 : cookTimeFilter === "60" ? 60 : null;
+    return recipes
+      .filter(r => {
+        if (!q) return true;
+        if (r.title?.toLowerCase().includes(q)) return true;
+        if (r.tags?.some(t => t.toLowerCase().includes(q))) return true;
+        if (r.ingredients?.some(i => i.toLowerCase().includes(q))) return true;
+        return false;
+      })
+      .filter(r => abbeyApproved
+        ? (r.abbeyApproved === true || (r.abbeyApproved === undefined && isAbbyApproved(r)))
+        : true)
+      .filter(r => {
+        if (!limit) return true;
+        const mins = parseTotalMinutes(r.times?.["total time"]);
+        return mins === null || mins <= limit;
+      })
+      .filter(r => {
+        if (selectedTags.length === 0) return true;
+        const rt = (r.tags || []).map(t => t.toLowerCase().trim());
+        return selectedTags.some(sel => rt.includes(sel));
+      })
+      .sort((a, b) => {
+        if (recipeSort === "rating") return (b.rating || 0) - (a.rating || 0);
+        if (recipeSort === "cooked") return (b.timesCooked || 0) - (a.timesCooked || 0);
+        if (recipeSort === "az")     return a.title.localeCompare(b.title);
+        return 0;
+      });
+  }, [recipes, recipeSearch, abbeyApproved, cookTimeFilter, selectedTags, recipeSort]);
+
+  function clearAllFilters() {
+    setRecipeSearch(""); setRecipeSort("default");
+    setAbbeyApproved(false); setCookTimeFilter("any"); setSelectedTags([]);
+  }
+
+  const activeFilterCount = (recipeSearch ? 1 : 0) + (abbeyApproved ? 1 : 0)
+    + (cookTimeFilter !== "any" ? 1 : 0) + selectedTags.length;
 
   function removeFromPlan(day, meal) {
     setPlans(prev => {
@@ -2475,17 +2537,7 @@ export default function MealPlannerApp() {
                 )}
 
                 {/* ── RECIPES ── */}
-                {activeTab === "recipes" && (() => {
-                  const sortedFiltered = recipes
-                    .filter(r => r.title.toLowerCase().includes(recipeSearch.toLowerCase()))
-                    .filter(r => abbeyApproved ? (r.abbeyApproved === true || (r.abbeyApproved === undefined && isAbbyApproved(r))) : true)
-                    .sort((a, b) => {
-                      if (recipeSort === "rating") return (b.rating || 0) - (a.rating || 0);
-                      if (recipeSort === "cooked") return (b.timesCooked || 0) - (a.timesCooked || 0);
-                      if (recipeSort === "az") return a.title.localeCompare(b.title);
-                      return 0;
-                    });
-                  return (
+                {activeTab === "recipes" && (
                   <div className="fade-in">
                     <div style={{ marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                       <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
@@ -2527,32 +2579,38 @@ export default function MealPlannerApp() {
                       </div>
                     </div>
 
-                    {/* Search + sort bar */}
-                    <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-                      <div style={{ position: "relative", flex: 1 }}>
+                    {/* ── Filter Row 1: Search ── */}
+                    <style>{`.tag-scroll::-webkit-scrollbar { display: none; }`}</style>
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ position: "relative" }}>
                         <span style={{
                           position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)",
                           fontSize: 14, color: "#c0b8ac", pointerEvents: "none",
                         }}>🔍</span>
                         <input
                           type="text"
-                          placeholder="Search recipes…"
+                          placeholder="Search by title, ingredient, or tag…"
                           value={recipeSearch}
                           onChange={e => setRecipeSearch(e.target.value)}
                           style={{
-                            width: "100%", border: "1.5px solid #e8e0d4", borderRadius: 10,
+                            width: "100%", boxSizing: "border-box",
+                            border: "1.5px solid #e8e0d4", borderRadius: 10,
                             padding: "9px 14px 9px 36px", fontSize: 13,
                             fontFamily: "'DM Sans', sans-serif", color: "#1c1915",
                             background: "#fff", outline: "none",
                           }}
                         />
                       </div>
+                    </div>
+
+                    {/* ── Filter Row 2: Sort / Time / Abby / Clear ── */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
                       <select
                         value={recipeSort}
                         onChange={e => setRecipeSort(e.target.value)}
                         style={{
                           border: "1.5px solid #e8e0d4", borderRadius: 10,
-                          padding: "9px 14px", fontSize: 13,
+                          padding: "8px 12px", fontSize: 13,
                           fontFamily: "'DM Sans', sans-serif", color: "#1c1915",
                           background: "#fff", cursor: "pointer", outline: "none",
                         }}
@@ -2562,36 +2620,83 @@ export default function MealPlannerApp() {
                         <option value="cooked">Most Cooked</option>
                         <option value="az">A → Z</option>
                       </select>
+                      {[["any","Any time"],["30","≤ 30 min"],["60","≤ 1 hr"]].map(([val, label]) => (
+                        <button key={val} onClick={() => setCookTimeFilter(val)} style={{
+                          border: "1.5px solid #e8e0d4", borderRadius: 20,
+                          padding: "7px 13px", fontSize: 12, fontWeight: 500,
+                          cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                          background: cookTimeFilter === val ? "#1c1915" : "#fff",
+                          color: cookTimeFilter === val ? "#f5f0e8" : "#1c1915",
+                          transition: "all 0.15s", whiteSpace: "nowrap",
+                        }}>{label}</button>
+                      ))}
                       <button
                         onClick={() => setAbbeyApproved(v => !v)}
                         title="Hide recipes with eggs, dairy, wheat, or gluten"
                         style={{
                           background: abbeyApproved ? "#4a7c59" : "transparent",
                           color: abbeyApproved ? "#fff" : "#4a7c59",
-                          border: "1.5px solid #4a7c59",
-                          borderRadius: 20,
-                          padding: "8px 14px",
-                          fontSize: 12,
-                          fontWeight: 500,
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                          fontFamily: "'DM Sans', sans-serif",
-                          transition: "all 0.2s",
+                          border: "1.5px solid #4a7c59", borderRadius: 20,
+                          padding: "8px 14px", fontSize: 12, fontWeight: 500,
+                          cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+                          fontFamily: "'DM Sans', sans-serif", transition: "all 0.2s",
                           whiteSpace: "nowrap",
-                          flexShrink: 0,
                         }}
-                      >
-                        🌿 Abby Approved
-                      </button>
+                      >🌿 Abby Approved</button>
+                      {activeFilterCount > 0 && (
+                        <button onClick={clearAllFilters} style={{
+                          marginLeft: "auto", background: "transparent", border: "none",
+                          padding: "7px 4px", fontSize: 12, color: "#8a7f72",
+                          cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                          display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap",
+                        }}>
+                          <span style={{
+                            background: "#e8e0d4", borderRadius: 20,
+                            padding: "1px 7px", fontSize: 11, color: "#5a5248", fontWeight: 600,
+                          }}>{activeFilterCount}</span>
+                          Clear filters ×
+                        </button>
+                      )}
                     </div>
+
+                    {/* ── Filter Row 3: Tag chips ── */}
+                    {recipes.length > 0 && topTags.length > 0 && (
+                      <div style={{ position: "relative", marginBottom: 20 }}>
+                        <div className="tag-scroll" style={{
+                          display: "flex", gap: 7, overflowX: "auto",
+                          paddingBottom: 4, scrollbarWidth: "none", msOverflowStyle: "none",
+                        }}>
+                          {topTags.map(tag => {
+                            const active = selectedTags.includes(tag);
+                            return (
+                              <button key={tag} onClick={() =>
+                                setSelectedTags(prev => active ? prev.filter(t => t !== tag) : [...prev, tag])
+                              } style={{
+                                flexShrink: 0, borderRadius: 20, padding: "5px 12px",
+                                fontSize: 11, fontWeight: active ? 600 : 400,
+                                cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                                border: active ? "1.5px solid #1c1915" : "1.5px solid #e8e0d4",
+                                background: active ? "#1c1915" : "#faf7f2",
+                                color: active ? "#f5f0e8" : "#5a5248",
+                                transition: "all 0.15s", whiteSpace: "nowrap",
+                              }}>{tag}</button>
+                            );
+                          })}
+                        </div>
+                        <div style={{
+                          position: "absolute", top: 0, right: 0,
+                          width: 48, height: "calc(100% - 4px)",
+                          background: "linear-gradient(to right, transparent, #f5f0e8)",
+                          pointerEvents: "none",
+                        }} />
+                      </div>
+                    )}
 
                     {sortedFiltered.length === 0 && (
                       <div style={{ color: "#8a7f72", fontSize: 14, textAlign: "center", paddingTop: 60 }}>
-                        {abbeyApproved && !recipeSearch
-                          ? "No Abby Approved recipes — none of your saved recipes are free of eggs, dairy, wheat, and gluten."
-                          : `No recipes match "${recipeSearch}"`}
+                        {activeFilterCount > 0
+                          ? <span>No recipes match your filters. <button onClick={clearAllFilters} style={{ background: "none", border: "none", color: "#4a7c59", cursor: "pointer", fontSize: 14, textDecoration: "underline", fontFamily: "'DM Sans', sans-serif", padding: 0 }}>Clear filters</button></span>
+                          : "No recipes yet."}
                       </div>
                     )}
 
@@ -2695,8 +2800,7 @@ export default function MealPlannerApp() {
                       ))}
                     </div>
                   </div>
-                  );
-                })()}
+                )}
 
                 {/* ── SHOPPING LIST ── */}
                 {activeTab === "shopping" && (
