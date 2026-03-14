@@ -1906,64 +1906,75 @@ export default function MealPlannerApp() {
       const pendingEdits = JSON.parse(localStorage.getItem("mealplanner_recipe_edits") || "{}");
       const savedEditsAfterSync = { ...pendingEdits };
 
-      // ── 1. Upload custom recipes to Drive ─────────────────────────────────────
+      // ── 1. Fetch all Drive files first (build fileId map for dedup + calorie saves) ─
+      const results = await fetchRecipesFromDrive(accessToken);
+      const driveFileIds = {};
+      results.forEach(({ recipe, fileId }) => { driveFileIds[recipe.id] = fileId; });
+
+      // ── 2. Upload custom recipes to Drive ─────────────────────────────────────
       const customRecipes = JSON.parse(localStorage.getItem("mealplanner_custom_recipes") || "[]");
       const uploadedIds = new Set();
+      const promotedRecipes = [];
       for (const recipe of customRecipes) {
         const edits = pendingEdits[recipe.id] || {};
         const toSave = { ...recipe, ...edits, abbeyApproved: isAbbyApproved({ ...recipe, ...edits }) };
         try {
-          await createRecipeInDrive(accessToken, toSave);
+          if (driveFileIds[recipe.id]) {
+            // Already in Drive — PATCH instead of creating a duplicate
+            await updateRecipeInDrive(accessToken, driveFileIds[recipe.id], toSave);
+          } else {
+            const newFileId = await createRecipeInDrive(accessToken, toSave);
+            driveFileIds[recipe.id] = newFileId;
+          }
           uploadedIds.add(recipe.id);
           delete savedEditsAfterSync[recipe.id];
+          promotedRecipes.push(toSave);
         } catch (e) {
           console.error("Failed to upload custom recipe:", recipe.title, e);
         }
       }
-      // Remove uploaded recipes from the custom localStorage list (Drive manages them now)
       const remainingCustom = customRecipes.filter(r => !uploadedIds.has(r.id));
       localStorage.setItem("mealplanner_custom_recipes", JSON.stringify(remainingCustom));
 
-      // ── 2. Fetch all Drive files (includes newly uploaded ones) ───────────────
-      const results = await fetchRecipesFromDrive(accessToken);
-
       // ── 3. Apply edits + re-evaluate Abby Approved; PATCH only when changed ───
       const processedResults = await Promise.all(
-        results.map(async ({ recipe, fileId }) => {
-          const edits = savedEditsAfterSync[recipe.id] || {};
-          const merged = Object.keys(edits).length > 0 ? { ...recipe, ...edits } : recipe;
-          const approved = isAbbyApproved(merged);
-          const needsPatch = Object.keys(edits).length > 0 || merged.abbeyApproved !== approved;
-          if (!needsPatch) return merged;
-          const toSave = { ...merged, abbeyApproved: approved };
-          try {
-            await updateRecipeInDrive(accessToken, fileId, toSave);
-            delete savedEditsAfterSync[recipe.id]; // edits are now baked into Drive
-          } catch (e) {
-            console.error("Failed to update Drive recipe:", recipe.title, e);
-          }
-          return toSave;
-        })
+        results
+          .filter(({ recipe }) => !uploadedIds.has(recipe.id)) // already handled above
+          .map(async ({ recipe, fileId }) => {
+            const edits = savedEditsAfterSync[recipe.id] || {};
+            const merged = Object.keys(edits).length > 0 ? { ...recipe, ...edits } : recipe;
+            const approved = isAbbyApproved(merged);
+            const needsPatch = Object.keys(edits).length > 0 || merged.abbeyApproved !== approved;
+            if (!needsPatch) return merged;
+            const toSave = { ...merged, abbeyApproved: approved };
+            try {
+              await updateRecipeInDrive(accessToken, fileId, toSave);
+              delete savedEditsAfterSync[recipe.id];
+            } catch (e) {
+              console.error("Failed to update Drive recipe:", recipe.title, e);
+            }
+            return toSave;
+          })
       );
 
-      // Persist updated edits state (cleared for successfully saved recipes)
       localStorage.setItem("mealplanner_recipe_edits", JSON.stringify(savedEditsAfterSync));
       setRecipeEdits(savedEditsAfterSync);
+      // Save fileId map so estimateCalories can PATCH Drive immediately
+      localStorage.setItem("mealplanner_file_ids", JSON.stringify(driveFileIds));
 
-      // ── 4. Preserve calorie/rating data (lives only in localStorage) ──────────
+      // ── 4. Preserve rating/timesCooked (localStorage-only); calories now in Drive ─
+      const allDriveRecipes = [...processedResults, ...promotedRecipes];
       const existingCached = JSON.parse(localStorage.getItem("mealplanner_recipes") || "[]");
       const preserved = {};
       existingCached.forEach(r => {
-        if (r.caloriesPerServing || r.calorieReasoning || r.rating || r.timesCooked) {
+        if (r.rating || r.timesCooked) {
           preserved[r.id] = {
-            ...(r.caloriesPerServing && { caloriesPerServing: r.caloriesPerServing }),
-            ...(r.calorieReasoning  && { calorieReasoning:   r.calorieReasoning }),
-            ...(r.rating            && { rating:             r.rating }),
-            ...(r.timesCooked       && { timesCooked:        r.timesCooked }),
+            ...(r.rating      && { rating:      r.rating }),
+            ...(r.timesCooked && { timesCooked: r.timesCooked }),
           };
         }
       });
-      const mergedData = processedResults.map(r => preserved[r.id] ? { ...r, ...preserved[r.id] } : r);
+      const mergedData = allDriveRecipes.map(r => preserved[r.id] ? { ...r, ...preserved[r.id] } : r);
 
       setRecipes([...remainingCustom, ...mergedData]);
       localStorage.setItem("mealplanner_recipes", JSON.stringify(mergedData));
@@ -1992,16 +2003,27 @@ export default function MealPlannerApp() {
       });
       const data = await res.json();
       if (data.caloriesPerServing) {
-        // Use functional setState to avoid the stale-closure problem with async functions
+        const calories = data.caloriesPerServing;
+        const reasoning = data.calorieReasoning || "";
+        // Update state + localStorage
         setRecipes(prev => {
           const updated = prev.map(r =>
-            r.id === recipe.id ? { ...r, caloriesPerServing: data.caloriesPerServing, calorieReasoning: data.calorieReasoning || "" } : r
+            r.id === recipe.id ? { ...r, caloriesPerServing: calories, calorieReasoning: reasoning } : r
           );
           localStorage.setItem("mealplanner_recipes", JSON.stringify(updated.filter(r => !r.isCustom)));
           localStorage.setItem("mealplanner_custom_recipes", JSON.stringify(updated.filter(r => r.isCustom)));
           return updated;
         });
-        return { calories: data.caloriesPerServing, reasoning: data.calorieReasoning || "" };
+        // Also PATCH Drive so calories persist across devices and localStorage clears
+        if (token) {
+          const fileIds = JSON.parse(localStorage.getItem("mealplanner_file_ids") || "{}");
+          const fileId = fileIds[recipe.id];
+          if (fileId) {
+            updateRecipeInDrive(token, fileId, { ...recipe, caloriesPerServing: calories, calorieReasoning: reasoning })
+              .catch(e => console.error("Failed to save calories to Drive:", e));
+          }
+        }
+        return { calories, reasoning };
       }
     } catch (err) {
       console.error("Failed to estimate calories:", err);
