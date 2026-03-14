@@ -740,6 +740,18 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
             </div>
           )}
 
+          {edits && !editMode && (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 8,
+              background: "rgba(200,160,60,0.08)", border: "1px solid rgba(200,160,60,0.25)",
+              borderRadius: 8, padding: "7px 12px", marginBottom: 16,
+              fontSize: 12, color: "#c8a03c",
+            }}>
+              <span>●</span>
+              <span>Changes saved locally — sync to Drive to save permanently</span>
+            </div>
+          )}
+
           <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20, flexWrap: "wrap" }}>
             <StarRating rating={recipe.rating} onChange={onRate} />
             {recipe.timesCooked > 0 && (
@@ -3091,15 +3103,15 @@ export default function MealPlannerApp() {
                                     🌿 Abby Approved
                                   </div>
                                 )}
-                                {recipe.caloriesPerServing && (
+                                {(recipeEdits[recipe.id]?.caloriesPerServing ?? recipe.caloriesPerServing) ? (
                                   <div style={{
                                     background: "rgba(200,160,60,0.2)", border: "1px solid rgba(200,160,60,0.4)",
                                     borderRadius: 20, padding: "3px 10px",
                                     fontSize: 11, color: "#f5dfa0", fontWeight: 500
                                   }}>
-                                    {recipe.caloriesPerServing} cal
+                                    {recipeEdits[recipe.id]?.caloriesPerServing ?? recipe.caloriesPerServing} cal
                                   </div>
-                                )}
+                                ) : null}
                               </div>
                             </div>
                             {recipe.image ? (
@@ -3131,9 +3143,9 @@ export default function MealPlannerApp() {
                               )}
                             </div>
 
-                            {recipe.tags?.length > 0 && (
+                            {(recipeEdits[recipe.id]?.tags ?? recipe.tags)?.length > 0 && (
                               <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 12 }}>
-                                {recipe.tags.slice(0, 3).map(tag => (
+                                {(recipeEdits[recipe.id]?.tags ?? recipe.tags).slice(0, 3).map(tag => (
                                   <span key={tag} style={{
                                     background: "#f0ebe2", borderRadius: 20, padding: "2px 9px",
                                     fontSize: 10, color: "#8a7f72", fontWeight: 500
@@ -3142,8 +3154,17 @@ export default function MealPlannerApp() {
                               </div>
                             )}
 
-                            <div style={{ fontSize: 10, color: "#c0b8ac", marginTop: 8, fontStyle: "italic" }}>
-                              Click to view recipe
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
+                              <div style={{ fontSize: 10, color: "#c0b8ac", fontStyle: "italic" }}>Click to view recipe</div>
+                              {recipeEdits[recipe.id] && (
+                                <div title="Changes not synced to Drive" style={{
+                                  fontSize: 9, color: "#c8a03c", fontWeight: 600,
+                                  background: "rgba(200,160,60,0.12)", borderRadius: 10,
+                                  padding: "2px 7px", letterSpacing: "0.03em",
+                                }}>
+                                  unsynced
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
