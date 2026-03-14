@@ -14,15 +14,21 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "API key not configured" });
   }
 
+  const servings = parseInt((yieldText || "4 servings").match(/\d+/)?.[0] || "4", 10);
+
   const prompt = `Given this recipe that makes ${yieldText || "4 servings"}, estimate the calories per serving.
 
 Ingredients:
 ${ingredients.join("\n")}
 
-Important: In the breakdown, show each ingredient's calorie contribution PER SERVING (i.e. the whole-recipe amount divided by the number of servings). The per-serving values should sum to the total calories per serving.
+In the breakdown, show the total calories for each ingredient (for the whole recipe), then end with a summary line showing the total divided by servings. Format exactly like this example:
+• Chicken thighs (2 lbs): 1400 cal
+• Olive oil (2 tbsp): 240 cal
+• Garlic (4 cloves): 20 cal
+Total: 1660 cal ÷ ${servings} servings = 415 / serving
 
 Respond with JSON only, no text outside the JSON object:
-{"calories": <integer calories per serving>, "breakdown": "<per-serving calorie breakdown, one bullet point per ingredient using •, values sum to calories>"}`;
+{"calories": <integer calories per serving>, "breakdown": "<ingredient list with whole-recipe cal totals, ending with the Total line>"}`;
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -34,7 +40,7 @@ Respond with JSON only, no text outside the JSON object:
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 400,
+        max_tokens: 600,
         messages: [
           { role: "user", content: prompt },
           { role: "assistant", content: "{" },
