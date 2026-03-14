@@ -2174,6 +2174,57 @@ export default function MealPlannerApp() {
     else { triggerOAuth((accessToken) => doSync(accessToken)); }
   }
 
+  async function reEstimateAllCalories(accessToken) {
+    const fileIds = JSON.parse(localStorage.getItem("mealplanner_file_ids") || "{}");
+    const allRecipes = recipes.filter(r => (r.ingredients?.length || 0) > 0);
+    if (allRecipes.length === 0) return;
+
+    setSyncStatus(`Re-estimating calories (0/${allRecipes.length})…`);
+    const calUpdates = {};
+    let done = 0;
+    for (const recipe of allRecipes) {
+      try {
+        const res = await fetch("/api/estimate-calories", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ingredients: recipe.ingredients, yield: recipe.yield }),
+        });
+        const data = await res.json();
+        if (data.caloriesPerServing) {
+          calUpdates[recipe.id] = {
+            caloriesPerServing: data.caloriesPerServing,
+            calorieReasoning: data.calorieReasoning || "",
+          };
+          setRecipes(prev => prev.map(r => r.id === recipe.id ? { ...r, ...calUpdates[recipe.id] } : r));
+          const fileId = fileIds[recipe.id];
+          if (fileId) {
+            updateRecipeInDrive(accessToken, fileId, { ...recipe, ...calUpdates[recipe.id] })
+              .catch(e => console.error("Failed to save calories to Drive:", e));
+          }
+        }
+      } catch (e) {
+        console.error("Failed to estimate calories for:", recipe.title, e);
+      }
+      done++;
+      setSyncStatus(`Re-estimating calories (${done}/${allRecipes.length})…`);
+    }
+
+    if (Object.keys(calUpdates).length > 0) {
+      setRecipes(prev => {
+        const updated = prev.map(r => calUpdates[r.id] ? { ...r, ...calUpdates[r.id] } : r);
+        localStorage.setItem("mealplanner_recipes", JSON.stringify(updated.filter(r => !r.isCustom)));
+        localStorage.setItem("mealplanner_custom_recipes", JSON.stringify(updated.filter(r => r.isCustom)));
+        return updated;
+      });
+    }
+    setSyncStatus(null);
+  }
+
+  function bulkReEstimate() {
+    if (token) { reEstimateAllCalories(token); }
+    else { triggerOAuth((accessToken) => reEstimateAllCalories(accessToken)); }
+  }
+
   async function estimateCalories(recipe) {
     try {
       const res = await fetch("/api/estimate-calories", {
@@ -2765,6 +2816,20 @@ export default function MealPlannerApp() {
                         >
                           <img src="https://www.google.com/favicon.ico" width={12} height={12} alt="" />
                           {loadingRecipes ? "Syncing…" : "Sync from Drive"}
+                        </button>
+                        <button
+                          onClick={bulkReEstimate}
+                          disabled={!!syncStatus}
+                          title="Re-estimate calories for all recipes using the latest AI model"
+                          style={{
+                            display: "flex", alignItems: "center", gap: 6,
+                            background: "#fff", border: "1.5px solid #e8e0d4", borderRadius: 8,
+                            padding: "7px 14px", fontSize: 12, color: "#1c1915",
+                            cursor: syncStatus ? "default" : "pointer",
+                            fontFamily: "'DM Sans', sans-serif", opacity: syncStatus ? 0.6 : 1,
+                          }}
+                        >
+                          ✨ Re-estimate all calories
                         </button>
                       </div>
                     </div>
