@@ -35,7 +35,7 @@ function getDayCalories(dayPlan, recipes) {
     return sum + arr.reduce((s, item) => {
       if (item.type !== "recipe") return s;
       const r = getRecipe(item.recipeId, recipes);
-      return s + (r?.caloriesPerServing || 0);
+      return s + (r?.caloriesPerServing || 0) * (item.servings || 1);
     }, 0);
   }, 0);
 }
@@ -1468,9 +1468,9 @@ function FreeformSlotItem({ text, onSave, onRemove }) {
   );
 }
 
-// ─── AddMealModal ─────────────────────────────────────────────────────────────
+// ─── BuildMealModal ────────────────────────────────────────────────────────────
 
-function AddMealModal({ target, recipes, recipeEdits, onSelectRecipe, onAddFreeform, onClose }) {
+function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRecipe, onAddFreeform, onUpdateServings, onRemoveItem, onClose }) {
   const [innerTab, setInnerTab] = useState("library");
   const [libSearch, setLibSearch] = useState("");
   const [freeformText, setFreeformText] = useState("");
@@ -1485,6 +1485,14 @@ function AddMealModal({ target, recipes, recipeEdits, onSelectRecipe, onAddFreef
     const title = (recipeEdits?.[r.id]?.title ?? r.title ?? "").toLowerCase();
     return title.includes(libSearch.toLowerCase());
   });
+
+  const hasMealItems = currentItems && currentItems.length > 0;
+
+  const servBtn = {
+    width: 26, height: 26, borderRadius: 6, border: "1.5px solid #e8e0d4",
+    background: "#faf7f2", cursor: "pointer", fontSize: 15, color: "#5a5248",
+    display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1, flexShrink: 0,
+  };
 
   return (
     <div
@@ -1504,7 +1512,7 @@ function AddMealModal({ target, recipes, recipeEdits, onSelectRecipe, onAddFreef
           borderRadius: 16,
           width: "90%",
           maxWidth: 560,
-          maxHeight: "75vh",
+          maxHeight: "82vh",
           display: "flex",
           flexDirection: "column",
           boxShadow: "0 24px 64px rgba(0,0,0,0.3)",
@@ -1512,11 +1520,11 @@ function AddMealModal({ target, recipes, recipeEdits, onSelectRecipe, onAddFreef
         }}
       >
         {/* Header */}
-        <div style={{ padding: "20px 20px 0", borderBottom: "1px solid #e8e0d4", paddingBottom: 0, flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 12 }}>
+        <div style={{ padding: "20px 20px 0", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14 }}>
             <div>
               <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, fontWeight: 700, color: "#1c1915", lineHeight: 1.2 }}>
-                Add a Meal
+                Build a Meal
               </div>
               {target && (
                 <div style={{ fontSize: 13, color: "#8a7f72", marginTop: 3 }}>
@@ -1533,9 +1541,67 @@ function AddMealModal({ target, recipes, recipeEdits, onSelectRecipe, onAddFreef
               }}
             >×</button>
           </div>
+        </div>
 
-          {/* Inner tab switcher */}
-          <div style={{ display: "flex", gap: 0, borderBottom: "1px solid #e8e0d4" }}>
+        {/* Current items in this slot */}
+        {hasMealItems && (
+          <div style={{ padding: "0 20px 14px", flexShrink: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+              Your meal
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {currentItems.map((item, idx) => {
+                if (item.type === "recipe") {
+                  const recipe = recipes.find(r => r.id === item.recipeId);
+                  if (!recipe) return null;
+                  const title = recipeEdits?.[recipe.id]?.title ?? recipe.title ?? "";
+                  const servings = item.servings || 1;
+                  const totalCal = recipe.caloriesPerServing ? Math.round(recipe.caloriesPerServing * servings) : null;
+                  return (
+                    <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", border: "1.5px solid #e8e0d4", borderRadius: 8, padding: "8px 10px" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: "#1c1915", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {recipeEmoji(recipe.id)} {title}
+                        </div>
+                        {totalCal != null && (
+                          <div style={{ fontSize: 11, color: "#8a7f72", marginTop: 1 }}>
+                            {totalCal} cal
+                            {servings !== 1 && <span style={{ color: "#c0b8ac" }}> ({servings} serving{servings !== 1 ? "s" : ""})</span>}
+                          </div>
+                        )}
+                      </div>
+                      {/* Servings control */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                        <button onClick={() => onUpdateServings(idx, servings - 0.5)} style={servBtn}>−</button>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: "#1c1915", minWidth: 22, textAlign: "center" }}>
+                          {servings % 1 === 0 ? servings : servings}
+                        </span>
+                        <button onClick={() => onUpdateServings(idx, servings + 0.5)} style={servBtn}>+</button>
+                      </div>
+                      <button onClick={() => onRemoveItem(idx)} style={{ background: "none", border: "none", cursor: "pointer", color: "#c0b8ac", fontSize: 16, padding: "0 2px", lineHeight: 1, flexShrink: 0 }}>×</button>
+                    </div>
+                  );
+                }
+                if (item.type === "freeform") {
+                  return (
+                    <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", border: "1.5px solid #e8e0d4", borderRadius: 8, padding: "8px 10px" }}>
+                      <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: "#3d5a4a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        ✏️ {item.text}
+                      </div>
+                      <button onClick={() => onRemoveItem(idx)} style={{ background: "none", border: "none", cursor: "pointer", color: "#c0b8ac", fontSize: 16, padding: "0 2px", lineHeight: 1, flexShrink: 0 }}>×</button>
+                    </div>
+                  );
+                }
+                return null;
+              })}
+            </div>
+            <div style={{ borderBottom: "1px solid #e8e0d4", marginTop: 14 }} />
+          </div>
+        )}
+
+        {/* Add more section — tabs */}
+        <div style={{ padding: "0 20px", borderBottom: "1px solid #e8e0d4", flexShrink: 0 }}>
+          <div style={{ display: "flex", gap: 0 }}>
             {[{ id: "library", label: "From Library" }, { id: "freeform", label: "Free Form" }].map(t => (
               <button
                 key={t.id}
@@ -1617,7 +1683,12 @@ function AddMealModal({ target, recipes, recipeEdits, onSelectRecipe, onAddFreef
               placeholder="e.g. Grilled salmon with roasted asparagus, leftover stir fry, pasta with whatever's in the fridge…"
               value={freeformText}
               onChange={e => setFreeformText(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (freeformText.trim()) onAddFreeform(freeformText.trim()); } }}
+              onKeyDown={e => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (freeformText.trim()) { onAddFreeform(freeformText.trim()); setFreeformText(""); }
+                }
+              }}
               style={{
                 flex: 1, minHeight: 120, border: "1.5px solid #e8e0d4", borderRadius: 10,
                 padding: "12px 14px", fontSize: 14, fontFamily: "'DM Sans', sans-serif",
@@ -1627,11 +1698,7 @@ function AddMealModal({ target, recipes, recipeEdits, onSelectRecipe, onAddFreef
             />
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button
-                onClick={onClose}
-                style={{ background: "none", border: "1.5px solid #e8e0d4", borderRadius: 8, padding: "8px 18px", fontSize: 13, color: "#8a7f72", cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}
-              >Cancel</button>
-              <button
-                onClick={() => { if (freeformText.trim()) onAddFreeform(freeformText.trim()); }}
+                onClick={() => { if (freeformText.trim()) { onAddFreeform(freeformText.trim()); setFreeformText(""); } }}
                 disabled={!freeformText.trim()}
                 style={{
                   background: freeformText.trim() ? "#1c1915" : "#e8e0d4",
@@ -1640,7 +1707,7 @@ function AddMealModal({ target, recipes, recipeEdits, onSelectRecipe, onAddFreef
                   fontWeight: 500, cursor: freeformText.trim() ? "pointer" : "default",
                   fontFamily: "'DM Sans', sans-serif",
                 }}
-              >Add Meal</button>
+              >Add</button>
             </div>
           </div>
         )}
@@ -2673,6 +2740,15 @@ export default function MealPlannerApp() {
     });
   }
 
+  function updateSlotItemServings(day, meal, index, servings) {
+    setPlans(prev => {
+      const cur = prev[weekOffset] ?? EMPTY_PLAN;
+      const arr = [...(Array.isArray(cur[day]?.[meal]) ? cur[day][meal] : [])];
+      arr[index] = { ...arr[index], servings: Math.max(0.5, servings) };
+      return { ...prev, [weekOffset]: { ...cur, [day]: { ...cur[day], [meal]: arr } } };
+    });
+  }
+
   function addToPlan(day, meal, item) {
     setPlans(prev => {
       const cur = prev[weekOffset] ?? EMPTY_PLAN;
@@ -2944,20 +3020,24 @@ export default function MealPlannerApp() {
         />
       )}
 
-      {/* Add Meal Modal */}
+      {/* Build Meal Modal */}
       {addMealTarget && (
-        <AddMealModal
+        <BuildMealModal
           target={addMealTarget}
           recipes={recipes}
           recipeEdits={recipeEdits}
+          currentItems={(() => {
+            const raw = plans[weekOffset]?.[addMealTarget.day]?.[addMealTarget.meal];
+            return Array.isArray(raw) ? raw : (typeof raw === "string" ? [{ type: "recipe", recipeId: raw }] : []);
+          })()}
           onSelectRecipe={recipe => {
-            addToPlan(addMealTarget.day, addMealTarget.meal, { type: "recipe", recipeId: recipe.id });
-            setAddMealTarget(null);
+            addToPlan(addMealTarget.day, addMealTarget.meal, { type: "recipe", recipeId: recipe.id, servings: 1 });
           }}
           onAddFreeform={text => {
             addToPlan(addMealTarget.day, addMealTarget.meal, { type: "freeform", text });
-            setAddMealTarget(null);
           }}
+          onUpdateServings={(index, servings) => updateSlotItemServings(addMealTarget.day, addMealTarget.meal, index, servings)}
+          onRemoveItem={index => removeFromPlan(addMealTarget.day, addMealTarget.meal, index)}
           onClose={() => setAddMealTarget(null)}
         />
       )}
@@ -3151,17 +3231,21 @@ export default function MealPlannerApp() {
                                           const recipe = getRecipe(item.recipeId, recipes);
                                           if (!recipe) return null;
                                           const title = recipeEdits[recipe.id]?.title ?? recipe.title ?? "";
+                                          const servings = item.servings || 1;
+                                          const dispCal = recipe.caloriesPerServing ? Math.round(recipe.caloriesPerServing * servings) : null;
                                           return (
                                             <div key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 4, minWidth: 0 }}>
                                               <div
-                                                onClick={() => setSelectedRecipe(recipe)}
+                                                onClick={() => setAddMealTarget({ day, meal })}
                                                 style={{ flex: 1, minWidth: 0, cursor: "pointer" }}
                                               >
                                                 <div style={{ fontSize: 11, fontWeight: 500, lineHeight: 1.3, color: "#1c1915", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                                   {recipeEmoji(recipe.id)} {title}
                                                 </div>
-                                                {recipe.caloriesPerServing && (
-                                                  <div style={{ fontSize: 10, color: "#8a7f72" }}>{recipe.caloriesPerServing} cal</div>
+                                                {dispCal != null && (
+                                                  <div style={{ fontSize: 10, color: "#8a7f72" }}>
+                                                    {dispCal} cal{servings !== 1 && <span style={{ color: "#c0b8ac" }}> ×{servings}</span>}
+                                                  </div>
                                                 )}
                                               </div>
                                               <button
@@ -3214,7 +3298,7 @@ export default function MealPlannerApp() {
                       borderRadius: 10, padding: "12px 18px", fontSize: 12, color: "#8a7f72",
                       display: "flex", alignItems: "center", gap: 8
                     }}>
-                      💡 <strong style={{ color: "#1c1915" }}>Tip:</strong> Click an empty slot (or "+ add") to add a recipe or free-form meal. Click × to remove individual items.
+                      💡 <strong style={{ color: "#1c1915" }}>Tip:</strong> Click any meal slot to open Build a Meal — add recipes, adjust servings, or add free-form notes. Click × to remove individual items.
                     </div>
                   </div>
                 )}
