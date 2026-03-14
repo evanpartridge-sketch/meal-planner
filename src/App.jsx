@@ -29,10 +29,14 @@ function getRecipe(id, recipes) {
 }
 
 function getDayCalories(dayPlan, recipes) {
-  return Object.values(dayPlan).reduce((sum, id) => {
-    if (!id) return sum;
-    const r = getRecipe(id, recipes);
-    return sum + (r?.caloriesPerServing || 0);
+  return Object.values(dayPlan).reduce((sum, slot) => {
+    if (!slot) return sum;
+    const arr = Array.isArray(slot) ? slot : [{ type: "recipe", recipeId: slot }];
+    return sum + arr.reduce((s, item) => {
+      if (item.type !== "recipe") return s;
+      const r = getRecipe(item.recipeId, recipes);
+      return s + (r?.caloriesPerServing || 0);
+    }, 0);
   }, 0);
 }
 
@@ -99,22 +103,26 @@ function generateShoppingItems(plan, recipes, recipeEdits, manualItems, qtyOverr
   const itemMap = {};
   DAYS.forEach(day => {
     MEALS.forEach(meal => {
-      const id = plan[day]?.[meal];
-      if (!id) return;
-      const r = recipes.find(rec => rec.id === id);
-      if (!r) return;
-      const baseServings = parseServings(r.yield);
-      const targetServings = servingOverrides[id] ?? baseServings;
-      const ratio = baseServings > 0 ? targetServings / baseServings : 1;
-      const ings = recipeEdits[id]?.ingredients ?? r.ingredients ?? [];
-      ings.forEach(ing => {
-        const key = ing.toLowerCase().trim();
-        if (!itemMap[key]) {
-          // Scale the text for this ingredient based on servings ratio
-          const scaledText = scaleIngredient(ing, ratio);
-          itemMap[key] = { key, origText: ing, scaledText, count: 0, isManual: false };
-        }
-        itemMap[key].count++;
+      const slot = plan[day]?.[meal];
+      if (!slot) return;
+      const arr = Array.isArray(slot) ? slot : [{ type: "recipe", recipeId: slot }];
+      arr.forEach(item => {
+        if (item.type !== "recipe") return;
+        const r = recipes.find(rec => rec.id === item.recipeId);
+        if (!r) return;
+        const baseServings = parseServings(r.yield);
+        const targetServings = servingOverrides[item.recipeId] ?? baseServings;
+        const ratio = baseServings > 0 ? targetServings / baseServings : 1;
+        const ings = recipeEdits[item.recipeId]?.ingredients ?? r.ingredients ?? [];
+        ings.forEach(ing => {
+          const key = ing.toLowerCase().trim();
+          if (!itemMap[key]) {
+            // Scale the text for this ingredient based on servings ratio
+            const scaledText = scaleIngredient(ing, ratio);
+            itemMap[key] = { key, origText: ing, scaledText, count: 0, isManual: false };
+          }
+          itemMap[key].count++;
+        });
       });
     });
   });
@@ -140,13 +148,17 @@ function generateShoppingItems(plan, recipes, recipeEdits, manualItems, qtyOverr
 function generateShoppingList(plan, recipes) {
   const ingredientMap = {};
   Object.values(plan).forEach(dayPlan => {
-    Object.values(dayPlan).forEach(id => {
-      if (!id) return;
-      const r = getRecipe(id, recipes);
-      if (!r) return;
-      (r.ingredients || []).forEach(ing => {
-        const key = ing.toLowerCase().trim();
-        ingredientMap[key] = (ingredientMap[key] || 0) + 1;
+    Object.values(dayPlan).forEach(slot => {
+      if (!slot) return;
+      const arr = Array.isArray(slot) ? slot : [{ type: "recipe", recipeId: slot }];
+      arr.forEach(item => {
+        if (item.type !== "recipe") return;
+        const r = getRecipe(item.recipeId, recipes);
+        if (!r) return;
+        (r.ingredients || []).forEach(ing => {
+          const key = ing.toLowerCase().trim();
+          ingredientMap[key] = (ingredientMap[key] || 0) + 1;
+        });
       });
     });
   });
@@ -1407,6 +1419,234 @@ function RecipePicker({ recipes, target, search, onSearchChange, onSelect, onClo
   );
 }
 
+// ─── FreeformSlotItem ─────────────────────────────────────────────────────────
+
+function FreeformSlotItem({ text, onSave, onRemove }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(text);
+
+  function commit() {
+    setEditing(false);
+    onSave(draft);
+  }
+
+  if (editing) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 3, minWidth: 0 }}>
+        <input
+          autoFocus
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setDraft(text); setEditing(false); } }}
+          style={{
+            flex: 1, minWidth: 0, fontSize: 11, border: "1px solid #c8a03c", borderRadius: 4,
+            padding: "2px 5px", fontFamily: "'DM Sans', sans-serif", outline: "none", color: "#1c1915",
+          }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 4, minWidth: 0 }}>
+      <div
+        onClick={() => { setDraft(text); setEditing(true); }}
+        style={{ flex: 1, minWidth: 0, cursor: "text" }}
+      >
+        <div style={{ fontSize: 11, lineHeight: 1.3, color: "#3d5a4a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          ✏️ {text}
+        </div>
+      </div>
+      <button
+        onClick={onRemove}
+        style={{ background: "none", border: "none", cursor: "pointer", color: "#c0b8ac", fontSize: 13, padding: "0 1px", lineHeight: 1, flexShrink: 0 }}
+      >×</button>
+    </div>
+  );
+}
+
+// ─── AddMealModal ─────────────────────────────────────────────────────────────
+
+function AddMealModal({ target, recipes, recipeEdits, onSelectRecipe, onAddFreeform, onClose }) {
+  const [innerTab, setInnerTab] = useState("library");
+  const [libSearch, setLibSearch] = useState("");
+  const [freeformText, setFreeformText] = useState("");
+
+  useEffect(() => {
+    function handleKey(e) { if (e.key === "Escape") onClose(); }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  const filtered = recipes.filter(r => {
+    const title = (recipeEdits?.[r.id]?.title ?? r.title ?? "").toLowerCase();
+    return title.includes(libSearch.toLowerCase());
+  });
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0,
+        background: "rgba(0,0,0,0.45)",
+        zIndex: 200,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "#faf7f2",
+          borderRadius: 16,
+          width: "90%",
+          maxWidth: 560,
+          maxHeight: "75vh",
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: "0 24px 64px rgba(0,0,0,0.3)",
+          overflow: "hidden",
+        }}
+      >
+        {/* Header */}
+        <div style={{ padding: "20px 20px 0", borderBottom: "1px solid #e8e0d4", paddingBottom: 0, flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 12 }}>
+            <div>
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, fontWeight: 700, color: "#1c1915", lineHeight: 1.2 }}>
+                Add a Meal
+              </div>
+              {target && (
+                <div style={{ fontSize: 13, color: "#8a7f72", marginTop: 3 }}>
+                  {target.day} · {target.meal}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={onClose}
+              style={{
+                background: "rgba(0,0,0,0.06)", border: "none", borderRadius: 20,
+                width: 32, height: 32, cursor: "pointer", fontSize: 18, color: "#8a7f72",
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginLeft: 12,
+              }}
+            >×</button>
+          </div>
+
+          {/* Inner tab switcher */}
+          <div style={{ display: "flex", gap: 0, borderBottom: "1px solid #e8e0d4" }}>
+            {[{ id: "library", label: "From Library" }, { id: "freeform", label: "Free Form" }].map(t => (
+              <button
+                key={t.id}
+                onClick={() => setInnerTab(t.id)}
+                style={{
+                  background: "none", border: "none", cursor: "pointer",
+                  padding: "10px 18px", fontSize: 13, fontWeight: 500,
+                  fontFamily: "'DM Sans', sans-serif",
+                  color: innerTab === t.id ? "#1c1915" : "#8a7f72",
+                  borderBottom: innerTab === t.id ? "2px solid #c8a03c" : "2px solid transparent",
+                  marginBottom: -1,
+                }}
+              >{t.label}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Library tab */}
+        {innerTab === "library" && (
+          <>
+            <div style={{ padding: "14px 20px 0", flexShrink: 0 }}>
+              <div style={{ position: "relative" }}>
+                <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: "#c0b8ac", pointerEvents: "none" }}>🔍</span>
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="Search recipes..."
+                  value={libSearch}
+                  onChange={e => setLibSearch(e.target.value)}
+                  style={{
+                    width: "100%", border: "1.5px solid #e8e0d4", borderRadius: 10,
+                    padding: "10px 14px 10px 36px", fontSize: 13,
+                    fontFamily: "'DM Sans', sans-serif", color: "#1c1915",
+                    background: "#fff", outline: "none", boxSizing: "border-box",
+                  }}
+                />
+              </div>
+            </div>
+            <div style={{ overflowY: "auto", flex: 1, padding: 16 }}>
+              {filtered.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "40px 0", color: "#8a7f72", fontSize: 14 }}>
+                  No recipes match "{libSearch}"
+                </div>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 12 }}>
+                  {filtered.map(recipe => (
+                    <div
+                      key={recipe.id}
+                      onClick={() => onSelectRecipe(recipe)}
+                      className="picker-card"
+                      style={{ background: "#fff", border: "1.5px solid #e8e0d4", borderRadius: 10, overflow: "hidden", cursor: "pointer" }}
+                    >
+                      {recipe.image ? (
+                        <img src={recipe.image} alt={recipe.title} style={{ width: "100%", height: 80, objectFit: "cover", display: "block" }} />
+                      ) : (
+                        <div style={{ height: 80, background: "linear-gradient(135deg, #2a2420 0%, #3d3128 100%)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28 }}>
+                          {recipeEmoji(recipe.id)}
+                        </div>
+                      )}
+                      <div style={{ padding: "8px 10px 4px", fontSize: 12, fontWeight: 600, color: "#1c1915", lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                        {recipeEdits?.[recipe.id]?.title ?? recipe.title}
+                      </div>
+                      {recipe.times?.["total time"] && (
+                        <div style={{ padding: "0 10px 8px", fontSize: 10, color: "#8a7f72" }}>⏱ {recipe.times["total time"]}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* Free form tab */}
+        {innerTab === "freeform" && (
+          <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
+            <textarea
+              autoFocus
+              placeholder="e.g. Grilled salmon with roasted asparagus, leftover stir fry, pasta with whatever's in the fridge…"
+              value={freeformText}
+              onChange={e => setFreeformText(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (freeformText.trim()) onAddFreeform(freeformText.trim()); } }}
+              style={{
+                flex: 1, minHeight: 120, border: "1.5px solid #e8e0d4", borderRadius: 10,
+                padding: "12px 14px", fontSize: 14, fontFamily: "'DM Sans', sans-serif",
+                color: "#1c1915", background: "#fff", outline: "none", resize: "none",
+                lineHeight: 1.5,
+              }}
+            />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button
+                onClick={onClose}
+                style={{ background: "none", border: "1.5px solid #e8e0d4", borderRadius: 8, padding: "8px 18px", fontSize: 13, color: "#8a7f72", cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}
+              >Cancel</button>
+              <button
+                onClick={() => { if (freeformText.trim()) onAddFreeform(freeformText.trim()); }}
+                disabled={!freeformText.trim()}
+                style={{
+                  background: freeformText.trim() ? "#1c1915" : "#e8e0d4",
+                  color: freeformText.trim() ? "#f5f0e8" : "#c0b8ac",
+                  border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13,
+                  fontWeight: 500, cursor: freeformText.trim() ? "pointer" : "default",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}
+              >Add Meal</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Shopping: SwipeableItem ──────────────────────────────────────────────────
 
 function ShoppingItem({ item, checked, onToggle, onDelete, onAdjustQty, search }) {
@@ -2026,6 +2266,7 @@ export default function MealPlannerApp() {
   const [syncStatus, setSyncStatus] = useState(null);
   const [driveError, setDriveError] = useState(null);
   const [lastSyncTime, setLastSyncTime] = useState(null);
+  const [addMealTarget, setAddMealTarget] = useState(null); // { day, meal } | null
 
   const plan = plans[weekOffset] ?? EMPTY_PLAN;
 
@@ -2060,7 +2301,26 @@ export default function MealPlannerApp() {
       const saved = localStorage.getItem("mealPlannerState");
       if (saved) {
         const data = JSON.parse(saved);
-        if (data.plans) setPlans(data.plans);
+        if (data.plans) {
+          // Migrate old string-based slots to SlotItem[] format
+          const migrated = {};
+          Object.entries(data.plans).forEach(([wk, weekPlan]) => {
+            migrated[wk] = {};
+            Object.entries(weekPlan).forEach(([day, dayPlan]) => {
+              migrated[wk][day] = {};
+              Object.entries(dayPlan).forEach(([meal, slot]) => {
+                if (typeof slot === "string") {
+                  migrated[wk][day][meal] = [{ type: "recipe", recipeId: slot }];
+                } else if (Array.isArray(slot)) {
+                  migrated[wk][day][meal] = slot;
+                } else {
+                  migrated[wk][day][meal] = [];
+                }
+              });
+            });
+          });
+          setPlans(migrated);
+        }
         if (data.checkedItems) setCheckedItems(data.checkedItems);
         if (data.calorieGoal) setCalorieGoal(data.calorieGoal);
       }
@@ -2402,17 +2662,20 @@ export default function MealPlannerApp() {
   const activeFilterCount = (recipeSearch ? 1 : 0) + (abbeyApproved ? 1 : 0)
     + (cookTimeFilter !== "any" ? 1 : 0) + selectedTags.length;
 
-  function removeFromPlan(day, meal) {
+  function removeFromPlan(day, meal, index) {
     setPlans(prev => {
       const cur = prev[weekOffset] ?? EMPTY_PLAN;
-      return { ...prev, [weekOffset]: { ...cur, [day]: { ...cur[day], [meal]: null } } };
+      const existing = Array.isArray(cur[day]?.[meal]) ? cur[day][meal] : [];
+      const updated = existing.filter((_, i) => i !== index);
+      return { ...prev, [weekOffset]: { ...cur, [day]: { ...cur[day], [meal]: updated } } };
     });
   }
 
-  function addToPlan(day, meal, recipeId) {
+  function addToPlan(day, meal, item) {
     setPlans(prev => {
       const cur = prev[weekOffset] ?? EMPTY_PLAN;
-      return { ...prev, [weekOffset]: { ...cur, [day]: { ...cur[day], [meal]: recipeId } } };
+      const existing = Array.isArray(cur[day]?.[meal]) ? cur[day][meal] : [];
+      return { ...prev, [weekOffset]: { ...cur, [day]: { ...cur[day], [meal]: [...existing, item] } } };
     });
   }
 
@@ -2653,7 +2916,7 @@ export default function MealPlannerApp() {
           search={pickerSearch}
           onSearchChange={setPickerSearch}
           onSelect={recipe => {
-            addToPlan(pickerTarget.day, pickerTarget.meal, recipe.id);
+            addToPlan(pickerTarget.day, pickerTarget.meal, { type: "recipe", recipeId: recipe.id });
             setPickerTarget(null);
             setPickerSearch("");
           }}
@@ -2676,6 +2939,24 @@ export default function MealPlannerApp() {
           onSaveEdits={edits => saveRecipeEdits(selectedRecipe.id, edits)}
           onDuplicate={() => duplicateRecipe(selectedRecipe, recipeEdits[selectedRecipe.id])}
           onDelete={selectedRecipe.isCustom ? () => deleteCustomRecipe(selectedRecipe.id) : undefined}
+        />
+      )}
+
+      {/* Add Meal Modal */}
+      {addMealTarget && (
+        <AddMealModal
+          target={addMealTarget}
+          recipes={recipes}
+          recipeEdits={recipeEdits}
+          onSelectRecipe={recipe => {
+            addToPlan(addMealTarget.day, addMealTarget.meal, { type: "recipe", recipeId: recipe.id });
+            setAddMealTarget(null);
+          }}
+          onAddFreeform={text => {
+            addToPlan(addMealTarget.day, addMealTarget.meal, { type: "freeform", text });
+            setAddMealTarget(null);
+          }}
+          onClose={() => setAddMealTarget(null)}
         />
       )}
 
@@ -2830,8 +3111,8 @@ export default function MealPlannerApp() {
                               </span>
                             </div>
                             {DAYS.map(day => {
-                              const recipeId = plan[day][meal];
-                              const recipe = recipeId ? getRecipe(recipeId, recipes) : null;
+                              const rawSlot = plan[day][meal];
+                              const slotItems = Array.isArray(rawSlot) ? rawSlot : (typeof rawSlot === "string" ? [{ type: "recipe", recipeId: rawSlot }] : []);
                               return (
                                 <div
                                   key={`${day}-${meal}`}
@@ -2842,38 +3123,76 @@ export default function MealPlannerApp() {
                                     border: "1.5px solid #e8e0d4",
                                     borderRadius: 8,
                                     padding: 8,
-                                    position: "relative",
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: 4,
                                   }}
                                 >
-                                  {recipe ? (
+                                  {slotItems.length === 0 ? (
                                     <div
-                                      onClick={() => setSelectedRecipe(recipe)}
-                                      style={{ cursor: "pointer", height: "100%" }}
-                                    >
-                                      <div style={{ fontSize: 18, marginBottom: 3 }}>{recipeEmoji(recipe.id)}</div>
-                                      <div style={{ fontSize: 11, fontWeight: 500, lineHeight: 1.3, color: "#1c1915", marginBottom: 3 }}>
-                                        {((recipeEdits[recipe.id]?.title ?? recipe.title).length > 28 ? (recipeEdits[recipe.id]?.title ?? recipe.title).slice(0, 28) + "…" : (recipeEdits[recipe.id]?.title ?? recipe.title))}
-                                      </div>
-                                      <div style={{ fontSize: 10, color: "#8a7f72" }}>{recipe.caloriesPerServing} cal</div>
-                                      <button
-                                        onClick={e => { e.stopPropagation(); removeFromPlan(day, meal); }}
-                                        style={{
-                                          position: "absolute", top: 5, right: 5,
-                                          background: "none", border: "none", cursor: "pointer",
-                                          color: "#c0b8ac", fontSize: 14, padding: 2, lineHeight: 1
-                                        }}
-                                      >×</button>
-                                    </div>
-                                  ) : (
-                                    <div
-                                      onClick={() => { setPickerTarget({ day, meal }); setPickerSearch(""); }}
+                                      onClick={() => setAddMealTarget({ day, meal })}
                                       style={{
-                                        height: "100%", minHeight: 54,
+                                        flex: 1, minHeight: 54,
                                         display: "flex", alignItems: "center", justifyContent: "center",
-                                        color: "#c0b8ac", fontSize: 18,
-                                        cursor: "pointer",
+                                        color: "#c0b8ac", fontSize: 18, cursor: "pointer",
                                       }}
                                     >+</div>
+                                  ) : (
+                                    <>
+                                      {slotItems.map((item, idx) => {
+                                        if (item.type === "recipe") {
+                                          const recipe = getRecipe(item.recipeId, recipes);
+                                          if (!recipe) return null;
+                                          const title = recipeEdits[recipe.id]?.title ?? recipe.title ?? "";
+                                          return (
+                                            <div key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 4, minWidth: 0 }}>
+                                              <div
+                                                onClick={() => setSelectedRecipe(recipe)}
+                                                style={{ flex: 1, minWidth: 0, cursor: "pointer" }}
+                                              >
+                                                <div style={{ fontSize: 11, fontWeight: 500, lineHeight: 1.3, color: "#1c1915", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                                  {recipeEmoji(recipe.id)} {title}
+                                                </div>
+                                                {recipe.caloriesPerServing && (
+                                                  <div style={{ fontSize: 10, color: "#8a7f72" }}>{recipe.caloriesPerServing} cal</div>
+                                                )}
+                                              </div>
+                                              <button
+                                                onClick={() => removeFromPlan(day, meal, idx)}
+                                                style={{ background: "none", border: "none", cursor: "pointer", color: "#c0b8ac", fontSize: 13, padding: "0 1px", lineHeight: 1, flexShrink: 0 }}
+                                              >×</button>
+                                            </div>
+                                          );
+                                        }
+                                        if (item.type === "freeform") {
+                                          return (
+                                            <FreeformSlotItem
+                                              key={idx}
+                                              text={item.text}
+                                              onSave={newText => {
+                                                if (!newText.trim()) { removeFromPlan(day, meal, idx); return; }
+                                                setPlans(prev => {
+                                                  const cur = prev[weekOffset] ?? EMPTY_PLAN;
+                                                  const arr = [...(Array.isArray(cur[day]?.[meal]) ? cur[day][meal] : [])];
+                                                  arr[idx] = { ...arr[idx], text: newText.trim() };
+                                                  return { ...prev, [weekOffset]: { ...cur, [day]: { ...cur[day], [meal]: arr } } };
+                                                });
+                                              }}
+                                              onRemove={() => removeFromPlan(day, meal, idx)}
+                                            />
+                                          );
+                                        }
+                                        return null;
+                                      })}
+                                      <button
+                                        onClick={() => setAddMealTarget({ day, meal })}
+                                        style={{
+                                          background: "none", border: "1px dashed #d4c9b8", borderRadius: 6,
+                                          padding: "3px 6px", fontSize: 10, color: "#c0b8ac", cursor: "pointer",
+                                          fontFamily: "'DM Sans', sans-serif", textAlign: "center", marginTop: 2,
+                                        }}
+                                      >+ add</button>
+                                    </>
                                   )}
                                 </div>
                               );
@@ -2888,7 +3207,7 @@ export default function MealPlannerApp() {
                       borderRadius: 10, padding: "12px 18px", fontSize: 12, color: "#8a7f72",
                       display: "flex", alignItems: "center", gap: 8
                     }}>
-                      💡 <strong style={{ color: "#1c1915" }}>Tip:</strong> Click any empty meal slot to pick a recipe. Click × on a filled slot to remove it.
+                      💡 <strong style={{ color: "#1c1915" }}>Tip:</strong> Click an empty slot (or "+ add") to add a recipe or free-form meal. Click × to remove individual items.
                     </div>
                   </div>
                 )}
