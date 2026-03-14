@@ -2075,7 +2075,8 @@ export default function MealPlannerApp() {
         : true)
       .filter(r => {
         if (!limit) return true;
-        const mins = parseTotalMinutes(r.times?.["total time"]);
+        const timeStr = r.times?.["total time"] || r.times?.["active time"] || r.times?.["cook time"];
+        const mins = parseTotalMinutes(timeStr);
         return mins === null || mins <= limit;
       })
       .filter(r => {
