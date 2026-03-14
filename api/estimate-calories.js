@@ -66,6 +66,22 @@ Respond with JSON only, no text outside the JSON object:
       return res.status(500).json({ error: "Could not parse calorie estimate" });
     }
 
+    // Recompute the total from the ingredient lines so the math always adds up.
+    // Claude's arithmetic is unreliable; we parse the numbers and sum them ourselves.
+    const ingredientLines = breakdown
+      .split("\n")
+      .filter(l => l.trim().startsWith("•"));
+    const ingredientTotal = ingredientLines.reduce((sum, line) => {
+      const m = line.match(/:\s*(\d+)\s*cal/i);
+      return sum + (m ? parseInt(m[1], 10) : 0);
+    }, 0);
+
+    if (ingredientTotal > 0) {
+      calories = Math.round(ingredientTotal / servings);
+      const totalLine = `Total: ${ingredientTotal} cal ÷ ${servings} servings = ${calories} / serving`;
+      breakdown = [...ingredientLines, totalLine].join("\n");
+    }
+
     return res.status(200).json({ caloriesPerServing: calories, calorieReasoning: breakdown });
   } catch (err) {
     console.error(err);
