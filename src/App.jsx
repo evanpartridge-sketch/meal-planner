@@ -1934,7 +1934,7 @@ export default function MealPlannerApp() {
   const [calorieGoal, setCalorieGoal] = useState(CALORIE_GOAL);
   const [editingGoal, setEditingGoal] = useState(false);
   const [recipeSearch, setRecipeSearch] = useState("");
-  const [recipeSort, setRecipeSort] = useState("default");
+  const [recipeSort, setRecipeSort] = useState("az");
   const [abbeyApproved, setAbbeyApproved] = useState(false);
   const [cookTimeFilter, setCookTimeFilter] = useState("any"); // "any" | "30" | "60"
   const [selectedTags, setSelectedTags] = useState([]);        // string[]
@@ -2201,7 +2201,7 @@ export default function MealPlannerApp() {
   }, [recipes, recipeSearch, abbeyApproved, cookTimeFilter, selectedTags, recipeSort]);
 
   function clearAllFilters() {
-    setRecipeSearch(""); setRecipeSort("default");
+    setRecipeSearch(""); setRecipeSort("az");
     setAbbeyApproved(false); setCookTimeFilter("any"); setSelectedTags([]);
   }
 
