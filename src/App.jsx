@@ -9,7 +9,7 @@ const CALORIE_GOAL = 1800;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MEALS = ["Breakfast", "Lunch", "Dinner"];
 
 const EMPTY_PLAN = {
@@ -253,21 +253,23 @@ function recipeEmoji(id) {
 
 // ─── Week Helpers ─────────────────────────────────────────────────────────────
 
-function getMondayOfWeek(offset) {
+function getSundayOfWeek(offset) {
   const today = new Date();
   const dow = today.getDay(); // 0=Sun, 1=Mon, …
-  const daysToMon = dow === 0 ? -6 : 1 - dow;
   const d = new Date(today);
-  d.setDate(today.getDate() + daysToMon + offset * 7);
+  d.setDate(today.getDate() - dow + offset * 7);
   return d;
 }
+
+// Keep old name as alias so existing call-sites work
+const getMondayOfWeek = getSundayOfWeek;
 
 function getWeekLabel(offset) {
   if (offset === 0) return "This Week";
   if (offset === -1) return "Last Week";
   if (offset === 1) return "Next Week";
-  const mon = getMondayOfWeek(offset);
-  return `Week of ${mon.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+  const sun = getSundayOfWeek(offset);
+  return `Week of ${sun.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 }
 
 // ─── Google Drive API ─────────────────────────────────────────────────────────
@@ -3077,14 +3079,19 @@ export default function MealPlannerApp() {
                     <div style={{ overflowX: "auto", paddingBottom: 8 }}>
                       <div style={{ display: "grid", gridTemplateColumns: "80px repeat(7, 1fr)", gap: 6, minWidth: 860 }}>
                         <div />
-                        {DAYS.map(day => {
+                        {DAYS.map((day, dayIdx) => {
                           const cals = getDayCalories(plan[day], recipes);
                           const pct = Math.min((cals / calorieGoal) * 100, 100);
                           const over = cals > calorieGoal;
+                          const dayDate = new Date(getSundayOfWeek(weekOffset).getTime() + dayIdx * 86400000);
+                          const isToday = dayDate.toDateString() === new Date().toDateString();
                           return (
                             <div key={day} style={{ textAlign: "center", paddingBottom: 8 }}>
-                              <div style={{ fontSize: 11, fontWeight: 500, color: "#8a7f72", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                              <div style={{ fontSize: 11, fontWeight: 500, color: isToday ? "#c8a03c" : "#8a7f72", letterSpacing: "0.06em", textTransform: "uppercase" }}>
                                 {day.slice(0, 3)}
+                              </div>
+                              <div style={{ fontSize: 11, color: isToday ? "#c8a03c" : "#b0a898", fontWeight: isToday ? 600 : 400, marginBottom: 2 }}>
+                                {dayDate.toLocaleDateString("en-US", { month: "numeric", day: "numeric" })}
                               </div>
                               <div style={{ fontSize: 12, color: over ? "#c94040" : "#4a7c59", fontWeight: 500, margin: "3px 0 5px" }}>
                                 {cals > 0 ? `${cals} cal` : "—"}
