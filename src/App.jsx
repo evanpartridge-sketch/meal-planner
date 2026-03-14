@@ -154,20 +154,39 @@ function generateShoppingList(plan, recipes) {
 }
 
 const ABBY_BLOCKED = [
+  // Eggs
   /\beggs?\b/i,
-  /\bmilk\b/i,
+  /\bmayo(?:nnaise)?\b/i,
+  // Dairy — exclude common dairy-free alternatives
+  /(?<!peanut |almond |cashew |nut )\bbutter\b/i,
+  /(?<!coconut |oat |almond |soy |rice )\bmilk\b/i,
   /\bcheese\b/i,
-  /\bbutter\b/i,
-  /\bcream\b/i,
+  /(?<!coconut )\bcream\b/i,
   /\byogurt\b/i,
+  /\bghee\b/i,
   /\bwhey\b/i,
   /\bcasein\b/i,
   /\blactose\b/i,
+  // Wheat / Gluten
   /\bwheat\b/i,
-  /\bflour\b/i,
+  /(?<!almond |rice |oat |coconut |chickpea )\bflour\b/i,
   /\bgluten\b/i,
   /\bbarley\b/i,
   /\brye\b/i,
+  // Wheat-based pasta & grains
+  /\borzo\b/i,
+  /\bpasta\b/i,
+  /\bspaghetti\b/i,
+  /\bpenne\b/i,
+  /\bfettuccine?\b/i,
+  /\brigatoni\b/i,
+  /\bfusilli\b/i,
+  /\bcouscous\b/i,
+  /\bsemolina\b/i,
+  /\bfarro\b/i,
+  /\bspelt\b/i,
+  /\bbreadcrumbs?\b/i,
+  /\bpanko\b/i,
 ];
 
 function isAbbyApproved(recipe) {
@@ -245,7 +264,7 @@ async function fetchRecipesFromDrive(token) {
   if (!listData.files || listData.files.length === 0) return [];
 
   // Fetch each file's content in parallel
-  const recipes = await Promise.all(
+  const results = await Promise.all(
     listData.files.map(async file => {
       try {
         const contentRes = await fetch(
@@ -253,14 +272,29 @@ async function fetchRecipesFromDrive(token) {
           { headers: { Authorization: `Bearer ${token}` } }
         );
         if (!contentRes.ok) return null;
-        return await contentRes.json();
+        const recipe = await contentRes.json();
+        return { recipe, fileId: file.id };
       } catch {
         return null;
       }
     })
   );
 
-  return recipes.filter(Boolean);
+  return results.filter(Boolean);
+}
+
+async function updateRecipeInDrive(token, fileId, recipe) {
+  await fetch(
+    `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(recipe, null, 2),
+    }
+  );
 }
 
 // ─── Loading Spinner ──────────────────────────────────────────────────────────
@@ -298,7 +332,7 @@ function SignInScreen({ onSignIn }) {
   function handleSignIn() {
     const client = window.google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
-      scope: "https://www.googleapis.com/auth/drive.readonly",
+      scope: "https://www.googleapis.com/auth/drive",
       callback: (response) => {
         if (response.access_token) {
           onSignIn(response.access_token);
@@ -1806,9 +1840,14 @@ export default function MealPlannerApp() {
       }
       const cachedDrive = localStorage.getItem("mealplanner_recipes");
       const cachedCustom = localStorage.getItem("mealplanner_custom_recipes");
-      const driveRecipes = cachedDrive ? JSON.parse(cachedDrive) : [];
+      const rawDrive = cachedDrive ? JSON.parse(cachedDrive) : [];
       const customRecipes = cachedCustom ? JSON.parse(cachedCustom) : [];
-      if (driveRecipes.length || customRecipes.length) setRecipes([...customRecipes, ...driveRecipes]);
+      // Re-evaluate Abby Approved on load so badges reflect the current rules immediately
+      const driveRecipes = rawDrive.map(r => ({ ...r, abbeyApproved: isAbbyApproved(r) }));
+      if (driveRecipes.length || customRecipes.length) {
+        setRecipes([...customRecipes, ...driveRecipes]);
+        localStorage.setItem("mealplanner_recipes", JSON.stringify(driveRecipes));
+      }
       const lastSync = localStorage.getItem("mealplanner_last_sync");
       if (lastSync) setLastSyncTime(lastSync);
       const savedEdits = localStorage.getItem("mealplanner_recipe_edits");
@@ -1828,7 +1867,7 @@ export default function MealPlannerApp() {
   function triggerOAuth(callback) {
     const client = window.google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
-      scope: "https://www.googleapis.com/auth/drive.readonly",
+      scope: "https://www.googleapis.com/auth/drive",
       callback: (response) => {
         if (response.access_token) {
           setToken(response.access_token);
@@ -1843,7 +1882,21 @@ export default function MealPlannerApp() {
     setLoadingRecipes(true);
     setDriveError(null);
     try {
-      const data = await fetchRecipesFromDrive(accessToken);
+      const results = await fetchRecipesFromDrive(accessToken);
+
+      // Re-evaluate Abby Approved for every recipe; write back to Drive only when the value changed
+      const labelledResults = await Promise.all(
+        results.map(async ({ recipe, fileId }) => {
+          const approved = isAbbyApproved(recipe);
+          if (recipe.abbeyApproved === approved) return recipe;
+          const updated = { ...recipe, abbeyApproved: approved };
+          try { await updateRecipeInDrive(accessToken, fileId, updated); } catch (e) {
+            console.error("Failed to save Abby Approved for:", recipe.title, e);
+          }
+          return updated;
+        })
+      );
+
       // Preserve calorie estimates, ratings, and timesCooked across Drive sync
       // (Drive files don't carry this data — it lives only in localStorage)
       const existingCached = JSON.parse(localStorage.getItem("mealplanner_recipes") || "[]");
@@ -1858,7 +1911,7 @@ export default function MealPlannerApp() {
           };
         }
       });
-      const mergedData = data.map(r => preserved[r.id] ? { ...r, ...preserved[r.id] } : r);
+      const mergedData = labelledResults.map(r => preserved[r.id] ? { ...r, ...preserved[r.id] } : r);
       const customRecipes = JSON.parse(localStorage.getItem("mealplanner_custom_recipes") || "[]");
       setRecipes([...customRecipes, ...mergedData]);
       localStorage.setItem("mealplanner_recipes", JSON.stringify(mergedData));
@@ -2345,7 +2398,7 @@ export default function MealPlannerApp() {
                 {activeTab === "recipes" && (() => {
                   const sortedFiltered = recipes
                     .filter(r => r.title.toLowerCase().includes(recipeSearch.toLowerCase()))
-                    .filter(r => abbeyApproved ? isAbbyApproved(r) : true)
+                    .filter(r => abbeyApproved ? (r.abbeyApproved === true || (r.abbeyApproved === undefined && isAbbyApproved(r))) : true)
                     .sort((a, b) => {
                       if (recipeSort === "rating") return (b.rating || 0) - (a.rating || 0);
                       if (recipeSort === "cooked") return (b.timesCooked || 0) - (a.timesCooked || 0);
@@ -2505,16 +2558,26 @@ export default function MealPlannerApp() {
                                 ✦ My Recipe
                               </div>
                             )}
-                            {recipe.caloriesPerServing && (
-                              <div style={{
-                                position: "absolute", top: 12, right: 12,
-                                background: "rgba(200,160,60,0.2)", border: "1px solid rgba(200,160,60,0.4)",
-                                borderRadius: 20, padding: "3px 10px",
-                                fontSize: 11, color: "#c8a03c", fontWeight: 500
-                              }}>
-                                {recipe.caloriesPerServing} cal
-                              </div>
-                            )}
+                            <div style={{ position: "absolute", top: 12, right: 12, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5 }}>
+                              {recipe.abbeyApproved === true && (
+                                <div style={{
+                                  background: "rgba(74,124,89,0.25)", border: "1px solid rgba(74,124,89,0.5)",
+                                  borderRadius: 20, padding: "3px 10px",
+                                  fontSize: 10, color: "#7ec89a", fontWeight: 500
+                                }}>
+                                  🌿 Abby Approved
+                                </div>
+                              )}
+                              {recipe.caloriesPerServing && (
+                                <div style={{
+                                  background: "rgba(200,160,60,0.2)", border: "1px solid rgba(200,160,60,0.4)",
+                                  borderRadius: 20, padding: "3px 10px",
+                                  fontSize: 11, color: "#c8a03c", fontWeight: 500
+                                }}>
+                                  {recipe.caloriesPerServing} cal
+                                </div>
+                              )}
+                            </div>
                           </div>
 
                           <div style={{ padding: "14px 16px" }}>
