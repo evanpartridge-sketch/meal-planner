@@ -2170,6 +2170,16 @@ export default function MealPlannerApp() {
     return [...seen].sort();
   }, [recipes]);
 
+  const abbeyApprovedTagSet = useMemo(() => {
+    const seen = new Set();
+    recipes.forEach(r => {
+      if (r.abbeyApproved === true || (r.abbeyApproved === undefined && isAbbyApproved(r))) {
+        (r.tags || []).forEach(tag => seen.add(tag.toLowerCase().trim()));
+      }
+    });
+    return seen;
+  }, [recipes]);
+
   const sortedFiltered = useMemo(() => {
     const q = recipeSearch.toLowerCase();
     const limit = cookTimeFilter === "30" ? 30 : cookTimeFilter === "60" ? 60 : null;
@@ -2794,7 +2804,7 @@ export default function MealPlannerApp() {
                                   />
                                 </div>
                                 <div style={{ overflowY: "auto", padding: "4px 0" }}>
-                                  {allTags.filter(t => !tagSearch || t.includes(tagSearch.toLowerCase())).map(tag => {
+                                  {allTags.filter(t => (!abbeyApproved || abbeyApprovedTagSet.has(t)) && (!tagSearch || t.includes(tagSearch.toLowerCase()))).map(tag => {
                                     const active = selectedTags.includes(tag);
                                     return (
                                       <label key={tag} style={{
