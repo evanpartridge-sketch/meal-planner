@@ -462,7 +462,7 @@ function scaleIngredient(ing, ratio) {
 
 // ─── Recipe Detail Modal ──────────────────────────────────────────────────────
 
-function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalories, edits, onSaveEdits, onDelete }) {
+function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalories, edits, onSaveEdits, onDuplicate, onDelete }) {
   useEffect(() => {
     function handleKey(e) { if (e.key === "Escape") onClose(); }
     window.addEventListener("keydown", handleKey);
@@ -693,6 +693,15 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
                     fontFamily: "'DM Sans', sans-serif",
                   }}
                 >✏️ Edit Recipe</button>
+                <button
+                  onClick={onDuplicate}
+                  title="Duplicate this recipe"
+                  style={{
+                    background: "none", border: "1px solid #d4c9b8", borderRadius: 8,
+                    padding: "6px 14px", fontSize: 12, color: "#8a7f72", cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >⧉ Duplicate</button>
                 {recipe.isCustom && onDelete && (
                   <button
                     onClick={() => {
@@ -2441,6 +2450,46 @@ export default function MealPlannerApp() {
     setShowCreateRecipe(false);
   }
 
+  function duplicateRecipe(recipe, edits) {
+    // Build a display title from effective values
+    const baseTitle = edits?.title ?? recipe.title ?? "Recipe";
+    // Strip any existing " (N)" suffix to find the root title
+    const rootTitle = baseTitle.replace(/\s*\(\d+\)\s*$/, "");
+    // Find the next available number
+    const used = new Set(
+      recipes
+        .map(r => recipeEdits[r.id]?.title ?? r.title ?? "")
+        .filter(t => t === rootTitle || t.startsWith(rootTitle + " ("))
+        .map(t => { const m = t.match(/\((\d+)\)$/); return m ? parseInt(m[1], 10) : 0; })
+    );
+    let n = 1;
+    while (used.has(n)) n++;
+    const newTitle = `${rootTitle} (${n})`;
+
+    const newRecipe = {
+      id: "custom_" + Date.now(),
+      isCustom: true,
+      title: newTitle,
+      yield: edits?.yield ?? recipe.yield ?? "",
+      times: edits?.times ?? recipe.times ?? {},
+      ingredients: edits?.ingredients ?? recipe.ingredients ?? [],
+      instructions: edits?.instructions ?? recipe.instructions ?? [],
+      description: edits?.description ?? recipe.description ?? "",
+      tags: edits?.tags ?? recipe.tags ?? [],
+      caloriesPerServing: edits?.caloriesPerServing ?? recipe.caloriesPerServing ?? null,
+      calorieReasoning: edits?.calorieReasoning ?? recipe.calorieReasoning ?? "",
+      rating: 0,
+      timesCooked: 0,
+      ...(recipe.author ? { author: recipe.author } : {}),
+      ...(recipe.sourceUrl ? { sourceUrl: recipe.sourceUrl } : {}),
+      ...(recipe.image ? { image: recipe.image } : {}),
+    };
+    const existing = JSON.parse(localStorage.getItem("mealplanner_custom_recipes") || "[]");
+    localStorage.setItem("mealplanner_custom_recipes", JSON.stringify([newRecipe, ...existing]));
+    setRecipes(prev => [newRecipe, ...prev]);
+    setSelectedRecipe(newRecipe);
+  }
+
   function deleteCustomRecipe(id) {
     const existing = JSON.parse(localStorage.getItem("mealplanner_custom_recipes") || "[]");
     localStorage.setItem("mealplanner_custom_recipes", JSON.stringify(existing.filter(r => r.id !== id)));
@@ -2625,6 +2674,7 @@ export default function MealPlannerApp() {
           }}
           edits={recipeEdits[selectedRecipe.id]}
           onSaveEdits={edits => saveRecipeEdits(selectedRecipe.id, edits)}
+          onDuplicate={() => duplicateRecipe(selectedRecipe, recipeEdits[selectedRecipe.id])}
           onDelete={selectedRecipe.isCustom ? () => deleteCustomRecipe(selectedRecipe.id) : undefined}
         />
       )}
