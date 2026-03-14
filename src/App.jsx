@@ -808,6 +808,7 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
                             borderRadius: 8, padding: "10px 14px",
                             fontSize: 12, lineHeight: 1.7,
                             whiteSpace: "pre-line", width: 260,
+                            maxHeight: 260, overflowY: "auto",
                             boxShadow: "0 4px 16px rgba(0,0,0,0.25)",
                             zIndex: 10, pointerEvents: "none",
                           }}>

@@ -14,13 +14,15 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "API key not configured" });
   }
 
-  const prompt = `Given this recipe that makes ${yieldText || "4 servings"}, estimate the total calories per serving.
+  const prompt = `Given this recipe that makes ${yieldText || "4 servings"}, estimate the calories per serving.
 
 Ingredients:
 ${ingredients.join("\n")}
 
+Important: In the breakdown, show each ingredient's calorie contribution PER SERVING (i.e. the whole-recipe amount divided by the number of servings). The per-serving values should sum to the total calories per serving.
+
 Respond with JSON only, no text outside the JSON object:
-{"calories": <integer calories per serving>, "breakdown": "<brief per-ingredient calorie list, one bullet point per line using •>"}`;
+{"calories": <integer calories per serving>, "breakdown": "<per-serving calorie breakdown, one bullet point per ingredient using •, values sum to calories>"}`;
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
