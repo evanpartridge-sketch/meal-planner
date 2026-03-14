@@ -573,7 +573,7 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
 
   async function handleEstimate() {
     setIsEstimating(true);
-    try { await onEstimateCalories({ ...recipe, ingredients: effectiveIngredients }); }
+    try { await onEstimateCalories({ ...recipe, ingredients: effectiveIngredients, yield: effectiveYield }); }
     finally { setIsEstimating(false); }
   }
 
