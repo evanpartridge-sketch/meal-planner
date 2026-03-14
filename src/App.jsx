@@ -248,24 +248,30 @@ function getWeekLabel(offset) {
 // ─── Google Drive API ─────────────────────────────────────────────────────────
 
 async function fetchRecipesFromDrive(token) {
-  // List all JSON files in the folder
+  // List all JSON files in the folder, paginating through all results
   const q = encodeURIComponent(
     `'${DRIVE_FOLDER_ID}' in parents and mimeType='application/json' and trashed=false`
   );
-  const listRes = await fetch(
-    `${DRIVE_API}/files?q=${q}&fields=files(id,name)&pageSize=200`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
-  if (!listRes.ok) {
-    const err = await listRes.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `Drive API error ${listRes.status}`);
-  }
-  const listData = await listRes.json();
-  if (!listData.files || listData.files.length === 0) return [];
+  const allFiles = [];
+  let pageToken = null;
+  do {
+    const url = `${DRIVE_API}/files?q=${q}&fields=nextPageToken,files(id,name)&pageSize=1000`
+      + (pageToken ? `&pageToken=${pageToken}` : "");
+    const listRes = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!listRes.ok) {
+      const err = await listRes.json().catch(() => ({}));
+      throw new Error(err?.error?.message || `Drive API error ${listRes.status}`);
+    }
+    const listData = await listRes.json();
+    if (listData.files) allFiles.push(...listData.files);
+    pageToken = listData.nextPageToken || null;
+  } while (pageToken);
+
+  if (allFiles.length === 0) return [];
 
   // Fetch each file's content in parallel
   const results = await Promise.all(
-    listData.files.map(async file => {
+    allFiles.map(async file => {
       try {
         const contentRes = await fetch(
           `${DRIVE_API}/files/${file.id}?alt=media`,
