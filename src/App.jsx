@@ -469,7 +469,8 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
     return () => window.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
-  const origServings = parseServings(recipe.yield);
+  const effectiveYield = edits?.yield ?? recipe.yield ?? "";
+  const origServings = parseServings(effectiveYield);
   const [servingCount, setServingCount] = useState(origServings);
   const [isEstimating, setIsEstimating] = useState(false);
   const [showCalTooltip, setShowCalTooltip] = useState(false);
@@ -478,6 +479,7 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
   const [draftIngredients, setDraftIngredients] = useState([]);
   const [draftInstructions, setDraftInstructions] = useState([]);
   const [newComment, setNewComment] = useState("");
+  const [draftYield, setDraftYield] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const [draftTotalTime, setDraftTotalTime] = useState("");
   const [draftTags, setDraftTags] = useState([]);
@@ -497,6 +499,7 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
     setDraftTitle(effectiveTitle);
     setDraftIngredients([...effectiveIngredients]);
     setDraftInstructions([...effectiveInstructions]);
+    setDraftYield(effectiveYield);
     setDraftDescription(effectiveDescription);
     setDraftTotalTime(effectiveTotalTime);
     setDraftTags([...effectiveTags]);
@@ -528,6 +531,9 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
     if (instructionsChanged) {
       autoNotes.push({ id: `${Date.now()}-inst`, text: "Preparation steps updated", timestamp: ts, isAutoNote: true });
     }
+    if (draftYield.trim() !== effectiveYield) {
+      autoNotes.push({ id: `${Date.now()}-yield`, text: `Yield updated to "${draftYield.trim() || "—"}"`, timestamp: ts, isAutoNote: true });
+    }
     if (draftDescription.trim() !== effectiveDescription) {
       autoNotes.push({ id: `${Date.now()}-desc`, text: "Description updated", timestamp: ts, isAutoNote: true });
     }
@@ -543,6 +549,7 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
       title: draftTitle.trim() || effectiveTitle,
       ingredients: filteredIngredients,
       instructions: filteredInstructions,
+      yield: draftYield.trim() || effectiveYield,
       description: draftDescription.trim(),
       times: { ...(recipe.times || {}), "total time": draftTotalTime.trim() },
       tags: draftTags,
@@ -733,7 +740,7 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
           </div>
 
           {/* Stats row */}
-          {(timeEntries.length > 0 || recipe.yield || recipe.caloriesPerServing || onEstimateCalories) && (
+          {(true || timeEntries.length > 0 || recipe.caloriesPerServing || onEstimateCalories) && (
             <>
               <div style={{ height: 1, background: "#e8e0d4", margin: "0 0 20px" }} />
               <div style={{ display: "flex", gap: 32, flexWrap: "wrap", marginBottom: 20 }}>
@@ -759,18 +766,30 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
                     )}
                   </div>
                 ))}
-                {recipe.yield && (
-                  <div>
-                    <div style={{ fontSize: 10, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 500, marginBottom: 3 }}>
-                      Servings
-                    </div>
+                <div>
+                  <div style={{ fontSize: 10, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 500, marginBottom: 3 }}>
+                    Servings
+                  </div>
+                  {editMode ? (
+                    <input
+                      value={draftYield}
+                      onChange={e => setDraftYield(e.target.value)}
+                      placeholder="e.g. 4 servings"
+                      style={{
+                        fontSize: 14, color: "#1c1915", fontWeight: 500,
+                        border: "1px solid #d4c9b8", borderRadius: 6,
+                        padding: "3px 8px", width: 120,
+                        fontFamily: "'DM Sans', sans-serif", background: "#fffef8",
+                      }}
+                    />
+                  ) : (
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <button onClick={() => setServingCount(s => Math.max(1, s - 1))} style={{ width: 22, height: 22, borderRadius: "50%", border: "1px solid #d4c9b8", background: "#fff", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#8a7f72", padding: 0 }}>−</button>
                       <span style={{ fontSize: 15, color: "#1c1915", fontWeight: 500, minWidth: 24, textAlign: "center" }}>{servingCount}</span>
                       <button onClick={() => setServingCount(s => s + 1)} style={{ width: 22, height: 22, borderRadius: "50%", border: "1px solid #d4c9b8", background: "#fff", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#8a7f72", padding: 0 }}>+</button>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
                 <div>
                   <div style={{ fontSize: 10, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 500, marginBottom: 3 }}>
                     Calories
