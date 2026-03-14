@@ -478,18 +478,28 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
   const [draftIngredients, setDraftIngredients] = useState([]);
   const [draftInstructions, setDraftInstructions] = useState([]);
   const [newComment, setNewComment] = useState("");
+  const [draftDescription, setDraftDescription] = useState("");
+  const [draftTotalTime, setDraftTotalTime] = useState("");
+  const [draftTags, setDraftTags] = useState([]);
+  const [newTagInput, setNewTagInput] = useState("");
 
   const ratio = origServings > 0 ? servingCount / origServings : 1;
 
   const effectiveTitle = edits?.title ?? recipe.title;
   const effectiveIngredients = edits?.ingredients ?? recipe.ingredients ?? [];
   const effectiveInstructions = edits?.instructions ?? recipe.instructions ?? [];
+  const effectiveDescription = edits?.description ?? recipe.description ?? "";
+  const effectiveTotalTime = (edits?.times ?? recipe.times)?.["total time"] ?? "";
+  const effectiveTags = edits?.tags ?? recipe.tags ?? [];
   const comments = edits?.comments ?? [];
 
   function enterEditMode() {
     setDraftTitle(effectiveTitle);
     setDraftIngredients([...effectiveIngredients]);
     setDraftInstructions([...effectiveInstructions]);
+    setDraftDescription(effectiveDescription);
+    setDraftTotalTime(effectiveTotalTime);
+    setDraftTags([...effectiveTags]);
     setEditMode(true);
   }
 
@@ -518,11 +528,24 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
     if (instructionsChanged) {
       autoNotes.push({ id: `${Date.now()}-inst`, text: "Preparation steps updated", timestamp: ts, isAutoNote: true });
     }
+    if (draftDescription.trim() !== effectiveDescription) {
+      autoNotes.push({ id: `${Date.now()}-desc`, text: "Description updated", timestamp: ts, isAutoNote: true });
+    }
+    if (draftTotalTime.trim() !== effectiveTotalTime) {
+      autoNotes.push({ id: `${Date.now()}-time`, text: `Total time updated to "${draftTotalTime.trim() || "—"}"`, timestamp: ts, isAutoNote: true });
+    }
+    const addedTags = draftTags.filter(t => !effectiveTags.includes(t));
+    const removedTags = effectiveTags.filter(t => !draftTags.includes(t));
+    if (addedTags.length > 0) autoNotes.push({ id: `${Date.now()}-tag-add`, text: `Added tag${addedTags.length > 1 ? "s" : ""}: ${addedTags.join(", ")}`, timestamp: ts, isAutoNote: true });
+    if (removedTags.length > 0) autoNotes.push({ id: `${Date.now()}-tag-rem`, text: `Removed tag${removedTags.length > 1 ? "s" : ""}: ${removedTags.join(", ")}`, timestamp: ts, isAutoNote: true });
     const newEdits = {
       ...(edits || {}),
       title: draftTitle.trim() || effectiveTitle,
       ingredients: filteredIngredients,
       instructions: filteredInstructions,
+      description: draftDescription.trim(),
+      times: { ...(recipe.times || {}), "total time": draftTotalTime.trim() },
+      tags: draftTags,
       comments: [...comments, ...autoNotes],
     };
     onSaveEdits(newEdits);
@@ -547,7 +570,7 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
     finally { setIsEstimating(false); }
   }
 
-  const timeEntries = Object.entries(recipe.times || {}).filter(([, v]) => v);
+  const timeEntries = Object.entries(edits?.times ?? recipe.times ?? {}).filter(([, v]) => v);
 
   return (
     <div
@@ -719,7 +742,21 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
                     <div style={{ fontSize: 10, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 500, marginBottom: 3 }}>
                       {label}
                     </div>
-                    <div style={{ fontSize: 15, color: "#1c1915", fontWeight: 500 }}>{value}</div>
+                    {editMode && label === "total time" ? (
+                      <input
+                        value={draftTotalTime}
+                        onChange={e => setDraftTotalTime(e.target.value)}
+                        placeholder="e.g. 45 minutes"
+                        style={{
+                          fontSize: 14, color: "#1c1915", fontWeight: 500,
+                          border: "1px solid #d4c9b8", borderRadius: 6,
+                          padding: "3px 8px", width: 130,
+                          fontFamily: "'DM Sans', sans-serif", background: "#fffef8",
+                        }}
+                      />
+                    ) : (
+                      <div style={{ fontSize: 15, color: "#1c1915", fontWeight: 500 }}>{value}</div>
+                    )}
                   </div>
                 ))}
                 {recipe.yield && (
@@ -776,15 +813,27 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
           )}
 
           {/* Description */}
-          {recipe.description && (
+          {(effectiveDescription || editMode) && (
             <>
               <div style={{ height: 1, background: "#e8e0d4", margin: "0 0 20px" }} />
-              <p style={{
-                fontSize: 14, color: "#5a544c", lineHeight: 1.75,
-                fontStyle: "italic", margin: "0 0 20px",
-              }}>
-                {recipe.description}
-              </p>
+              {editMode ? (
+                <textarea
+                  value={draftDescription}
+                  onChange={e => setDraftDescription(e.target.value)}
+                  placeholder="Add a description…"
+                  rows={3}
+                  style={{
+                    width: "100%", boxSizing: "border-box", resize: "vertical",
+                    fontSize: 14, color: "#5a544c", lineHeight: 1.75, fontStyle: "italic",
+                    margin: "0 0 20px", border: "1px solid #d4c9b8", borderRadius: 6,
+                    padding: "8px 10px", fontFamily: "'DM Sans', sans-serif", background: "#fffef8",
+                  }}
+                />
+              ) : (
+                <p style={{ fontSize: 14, color: "#5a544c", lineHeight: 1.75, fontStyle: "italic", margin: "0 0 20px" }}>
+                  {effectiveDescription}
+                </p>
+              )}
             </>
           )}
 
@@ -939,16 +988,52 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
           )}
 
           {/* Tags + source link */}
-          {(recipe.tags?.length > 0 || recipe.sourceUrl) && (
+          {(effectiveTags.length > 0 || recipe.sourceUrl || editMode) && (
             <>
               <div style={{ height: 1, background: "#e8e0d4", margin: "28px 0 20px" }} />
-              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                {recipe.tags?.map(tag => (
-                  <span key={tag} style={{
-                    background: "#f0ebe2", borderRadius: 20,
-                    padding: "3px 11px", fontSize: 11, color: "#8a7f72", fontWeight: 500,
-                  }}>{tag}</span>
-                ))}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                {editMode ? (
+                  <>
+                    {draftTags.map(tag => (
+                      <span key={tag} style={{
+                        background: "#f0ebe2", borderRadius: 20,
+                        padding: "3px 8px 3px 11px", fontSize: 11, color: "#8a7f72", fontWeight: 500,
+                        display: "inline-flex", alignItems: "center", gap: 4,
+                      }}>
+                        {tag}
+                        <button
+                          onClick={() => setDraftTags(prev => prev.filter(t => t !== tag))}
+                          style={{ background: "none", border: "none", cursor: "pointer", color: "#8a7f72", padding: "0 2px", fontSize: 13, lineHeight: 1, display: "flex", alignItems: "center" }}
+                        >×</button>
+                      </span>
+                    ))}
+                    <input
+                      value={newTagInput}
+                      onChange={e => setNewTagInput(e.target.value)}
+                      onKeyDown={e => {
+                        if ((e.key === "Enter" || e.key === ",") && newTagInput.trim()) {
+                          e.preventDefault();
+                          const tag = newTagInput.trim().toLowerCase().replace(/,/g, "").replace(/\s+/g, " ");
+                          if (tag && !draftTags.includes(tag)) setDraftTags(prev => [...prev, tag]);
+                          setNewTagInput("");
+                        }
+                      }}
+                      placeholder="Add tag…"
+                      style={{
+                        fontSize: 11, color: "#8a7f72", border: "1px solid #d4c9b8",
+                        borderRadius: 20, padding: "3px 11px", width: 90,
+                        fontFamily: "'DM Sans', sans-serif", background: "#fffef8", outline: "none",
+                      }}
+                    />
+                  </>
+                ) : (
+                  effectiveTags.map(tag => (
+                    <span key={tag} style={{
+                      background: "#f0ebe2", borderRadius: 20,
+                      padding: "3px 11px", fontSize: 11, color: "#8a7f72", fontWeight: 500,
+                    }}>{tag}</span>
+                  ))
+                )}
                 {recipe.sourceUrl && (
                   <a
                     href={recipe.sourceUrl}
