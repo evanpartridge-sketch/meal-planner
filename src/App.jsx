@@ -800,11 +800,7 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
                         onMouseEnter={() => recipe.calorieReasoning && setShowCalTooltip(true)}
                         onMouseLeave={() => setShowCalTooltip(false)}
                       >
-                        <span style={{ fontSize: 15, color: "#1c1915", fontWeight: 500, cursor: recipe.calorieReasoning ? "help" : "default" }}>
-                          {servingCount === origServings
-                            ? `${recipe.caloriesPerServing} / serving`
-                            : `${Math.round(recipe.caloriesPerServing * servingCount)} for ${servingCount} serving${servingCount !== 1 ? "s" : ""}`}
-                        </span>
+                        <span style={{ fontSize: 15, color: "#1c1915", fontWeight: 500, cursor: recipe.calorieReasoning ? "help" : "default" }}>{recipe.caloriesPerServing} / serving</span>
                         {showCalTooltip && recipe.calorieReasoning && (
                           <div style={{
                             position: "absolute", bottom: "100%", left: 0,
