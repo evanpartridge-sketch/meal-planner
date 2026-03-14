@@ -2158,13 +2158,16 @@ export default function MealPlannerApp() {
 
   // ─── Recipe Filter Derived Values ──────────────────────────────────────────
 
-  const topTags = useMemo(() => {
-    const counts = {};
+  const [showTagDropdown, setShowTagDropdown] = useState(false);
+  const [tagSearch, setTagSearch] = useState("");
+
+  const allTags = useMemo(() => {
+    const seen = new Set();
     recipes.forEach(r => (r.tags || []).forEach(tag => {
       const t = tag.toLowerCase().trim();
-      if (t) counts[t] = (counts[t] || 0) + 1;
+      if (t) seen.add(t);
     }));
-    return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([t]) => t);
+    return [...seen].sort();
   }, [recipes]);
 
   const sortedFiltered = useMemo(() => {
@@ -2752,6 +2755,79 @@ export default function MealPlannerApp() {
                           whiteSpace: "nowrap",
                         }}
                       >🌿 Abby Approved</button>
+                      {allTags.length > 0 && (
+                        <div style={{ position: "relative" }}>
+                          <button
+                            onClick={() => setShowTagDropdown(v => !v)}
+                            style={{
+                              border: "1.5px solid #e8e0d4", borderRadius: 20,
+                              padding: "7px 13px", fontSize: 12, fontWeight: 500,
+                              cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                              background: selectedTags.length > 0 ? "#1c1915" : "#fff",
+                              color: selectedTags.length > 0 ? "#f5f0e8" : "#1c1915",
+                              whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 5,
+                            }}
+                          >
+                            🏷 Tags{selectedTags.length > 0 ? ` (${selectedTags.length})` : ""} ▾
+                          </button>
+                          {showTagDropdown && (
+                            <>
+                              <div style={{ position: "fixed", inset: 0, zIndex: 9 }} onClick={() => setShowTagDropdown(false)} />
+                              <div style={{
+                                position: "absolute", top: "calc(100% + 6px)", left: 0,
+                                background: "#fff", border: "1px solid #e8e0d4",
+                                borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.12)",
+                                zIndex: 10, width: 230, maxHeight: 320, display: "flex", flexDirection: "column",
+                              }}>
+                                <div style={{ padding: "8px 10px", borderBottom: "1px solid #e8e0d4" }}>
+                                  <input
+                                    value={tagSearch}
+                                    onChange={e => setTagSearch(e.target.value)}
+                                    placeholder="Search tags…"
+                                    autoFocus
+                                    style={{
+                                      width: "100%", boxSizing: "border-box",
+                                      border: "1px solid #d4c9b8", borderRadius: 6,
+                                      padding: "5px 9px", fontSize: 12,
+                                      fontFamily: "'DM Sans', sans-serif", background: "#faf7f2", outline: "none",
+                                    }}
+                                  />
+                                </div>
+                                <div style={{ overflowY: "auto", padding: "4px 0" }}>
+                                  {allTags.filter(t => !tagSearch || t.includes(tagSearch.toLowerCase())).map(tag => {
+                                    const active = selectedTags.includes(tag);
+                                    return (
+                                      <label key={tag} style={{
+                                        display: "flex", alignItems: "center", gap: 8,
+                                        padding: "5px 12px", cursor: "pointer", fontSize: 12,
+                                        color: "#1c1915", fontFamily: "'DM Sans', sans-serif",
+                                        background: active ? "#f5f0e8" : "transparent",
+                                      }}>
+                                        <input
+                                          type="checkbox"
+                                          checked={active}
+                                          onChange={() => setSelectedTags(prev => active ? prev.filter(t => t !== tag) : [...prev, tag])}
+                                          style={{ accentColor: "#1c1915", cursor: "pointer", flexShrink: 0 }}
+                                        />
+                                        {tag}
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                                {selectedTags.length > 0 && (
+                                  <div style={{ padding: "6px 12px", borderTop: "1px solid #e8e0d4" }}>
+                                    <button onClick={() => setSelectedTags([])} style={{
+                                      background: "none", border: "none", cursor: "pointer",
+                                      fontSize: 11, color: "#8a7f72", textDecoration: "underline",
+                                      fontFamily: "'DM Sans', sans-serif", padding: 0,
+                                    }}>Clear tag filters</button>
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
                       {activeFilterCount > 0 && (
                         <button onClick={clearAllFilters} style={{
                           marginLeft: "auto", background: "transparent", border: "none",
@@ -2768,38 +2844,6 @@ export default function MealPlannerApp() {
                       )}
                     </div>
 
-                    {/* ── Filter Row 3: Tag chips ── */}
-                    {recipes.length > 0 && topTags.length > 0 && (
-                      <div style={{ position: "relative", marginBottom: 20 }}>
-                        <div className="tag-scroll" style={{
-                          display: "flex", gap: 7, overflowX: "auto",
-                          paddingBottom: 4, scrollbarWidth: "none", msOverflowStyle: "none",
-                        }}>
-                          {topTags.map(tag => {
-                            const active = selectedTags.includes(tag);
-                            return (
-                              <button key={tag} onClick={() =>
-                                setSelectedTags(prev => active ? prev.filter(t => t !== tag) : [...prev, tag])
-                              } style={{
-                                flexShrink: 0, borderRadius: 20, padding: "5px 12px",
-                                fontSize: 11, fontWeight: active ? 600 : 400,
-                                cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                                border: active ? "1.5px solid #1c1915" : "1.5px solid #e8e0d4",
-                                background: active ? "#1c1915" : "#faf7f2",
-                                color: active ? "#f5f0e8" : "#5a5248",
-                                transition: "all 0.15s", whiteSpace: "nowrap",
-                              }}>{tag}</button>
-                            );
-                          })}
-                        </div>
-                        <div style={{
-                          position: "absolute", top: 0, right: 0,
-                          width: 48, height: "calc(100% - 4px)",
-                          background: "linear-gradient(to right, transparent, #f5f0e8)",
-                          pointerEvents: "none",
-                        }} />
-                      </div>
-                    )}
 
                     {sortedFiltered.length === 0 && (
                       <div style={{ color: "#8a7f72", fontSize: 14, textAlign: "center", paddingTop: 60 }}>
