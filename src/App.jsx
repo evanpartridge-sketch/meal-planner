@@ -3573,8 +3573,8 @@ export default function MealPlannerApp() {
                       )}
                     </div>
 
-                    <div style={{ overflowX: "auto", paddingBottom: 8 }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "80px repeat(7, 1fr)", gap: 6, minWidth: 860 }}>
+                    <div style={{ paddingBottom: 8 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "80px repeat(7, minmax(0, 1fr))", gap: 6 }}>
                         <div />
                         {DAYS.map((day, dayIdx) => {
                           const cals = getDayCalories(plan[day], recipes);
