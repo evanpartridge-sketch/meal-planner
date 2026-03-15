@@ -28,15 +28,17 @@ function getRecipe(id, recipes) {
   return recipes.find(r => r.id === id) || null;
 }
 
+function getItemCalories(item, recipes) {
+  if (item.type === "freeform") return item.calories ?? 0;
+  const r = getRecipe(item.recipeId, recipes);
+  return (item.customCalories ?? r?.caloriesPerServing ?? 0) * (item.servings || 1);
+}
+
 function getDayCalories(dayPlan, recipes) {
   return Object.values(dayPlan).reduce((sum, slot) => {
     if (!slot) return sum;
     const arr = Array.isArray(slot) ? slot : [{ type: "recipe", recipeId: slot }];
-    return sum + arr.reduce((s, item) => {
-      if (item.type !== "recipe") return s;
-      const r = getRecipe(item.recipeId, recipes);
-      return s + (item.customCalories ?? r?.caloriesPerServing ?? 0) * (item.servings || 1);
-    }, 0);
+    return sum + arr.reduce((s, item) => s + getItemCalories(item, recipes), 0);
   }, 0);
 }
 
@@ -45,11 +47,7 @@ function getMealCalories(plan, meal, recipes) {
     const slot = plan[day]?.[meal];
     if (!slot) return sum;
     const arr = Array.isArray(slot) ? slot : [{ type: "recipe", recipeId: slot }];
-    return sum + arr.reduce((s, item) => {
-      if (item.type !== "recipe") return s;
-      const r = getRecipe(item.recipeId, recipes);
-      return s + (item.customCalories ?? r?.caloriesPerServing ?? 0) * (item.servings || 1);
-    }, 0);
+    return sum + arr.reduce((s, item) => s + getItemCalories(item, recipes), 0);
   }, 0);
 }
 
@@ -1517,7 +1515,7 @@ function RecipePicker({ recipes, target, search, onSearchChange, onSelect, onClo
 
 // ─── FreeformSlotItem ─────────────────────────────────────────────────────────
 
-function FreeformSlotItem({ text, onSave, onRemove }) {
+function FreeformSlotItem({ text, calories, onSave, onRemove }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(text);
 
@@ -1553,6 +1551,9 @@ function FreeformSlotItem({ text, onSave, onRemove }) {
         <div style={{ fontSize: 11, lineHeight: 1.3, color: "#3d5a4a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           ✏️ {text}
         </div>
+        {calories != null && (
+          <div style={{ fontSize: 10, color: "#8a7f72" }}>{calories} cal</div>
+        )}
       </div>
       <button
         onClick={onRemove}
@@ -4028,6 +4029,7 @@ export default function MealPlannerApp() {
                                             <FreeformSlotItem
                                               key={idx}
                                               text={item.text}
+                                              calories={item.calories}
                                               onSave={newText => {
                                                 if (!newText.trim()) { removeFromPlan(day, meal, idx); return; }
                                                 setPlans(prev => {
@@ -4045,10 +4047,7 @@ export default function MealPlannerApp() {
                                       })}
                                       {(() => {
                                         const slotTotal = slotItems.reduce((sum, item) => {
-                                          if (item.type !== "recipe") return sum;
-                                          const r = getRecipe(item.recipeId, recipes);
-                                          const calBase = item.customCalories ?? r?.caloriesPerServing ?? null;
-                                          return calBase != null ? sum + Math.round(calBase * (item.servings || 1)) : sum;
+                                          return sum + Math.round(getItemCalories(item, recipes));
                                         }, 0);
                                         return slotTotal > 0 ? (
                                           <div style={{ fontSize: 10, fontWeight: 600, color: "#4a7c59", textAlign: "right", paddingRight: 2, marginTop: 2 }}>
