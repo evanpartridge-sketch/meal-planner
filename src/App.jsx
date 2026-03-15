@@ -1875,16 +1875,20 @@ function FreeformEditorModal({ item, onSave, onClose }) {
   };
 
   return (
-    <div style={{
-      position: "fixed", inset: 0, background: "rgba(28,25,21,0.55)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      zIndex: 1100, padding: 16,
-    }}>
-      <div style={{
-        background: "#fff", borderRadius: 16, width: "100%", maxWidth: 460,
-        boxShadow: "0 8px 40px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column",
-        maxHeight: "85vh", overflow: "hidden",
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(28,25,21,0.55)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: 1100, padding: 16,
       }}>
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "#fff", borderRadius: 16, width: "100%", maxWidth: 460,
+          boxShadow: "0 8px 40px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column",
+          maxHeight: "85vh", overflow: "hidden",
+        }}>
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px 12px", borderBottom: "1px solid #e8e0d4", flexShrink: 0 }}>
           <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, fontWeight: 600, color: "#1c1915" }}>
