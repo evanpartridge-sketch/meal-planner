@@ -160,9 +160,11 @@ function generateShoppingItemsFromCart(cartItems, recipes, recipeEdits, manualIt
   (cartItems || []).forEach(cartItem => {
     // Freeform items with ingredients
     if (cartItem.type === "freeform") {
+      const multiplier = servingOverrides[cartItem.text] ?? 1;
       (cartItem.ingredients || []).forEach(ing => {
         const key = ing.toLowerCase().trim();
-        if (!itemMap[key]) itemMap[key] = { key, origText: ing, scaledText: ing, count: 0, isManual: false };
+        const scaledText = multiplier !== 1 ? scaleIngredient(ing, multiplier) : ing;
+        if (!itemMap[key]) itemMap[key] = { key, origText: ing, scaledText, count: 0, isManual: false };
         itemMap[key].count++;
       });
       return;
@@ -2433,15 +2435,21 @@ function ShoppingListTab({ cartItems, recipes, recipeEdits, checkedItems, onSetC
   useEffect(() => { localStorage.setItem("mealplanner_hidden_items", JSON.stringify([...hidden])); }, [hidden]);
   useEffect(() => { localStorage.setItem("mealplanner_serving_overrides", JSON.stringify(servingOverrides)); }, [servingOverrides]);
 
-  // Recipes in the cart with their serving counts (recipe-type only)
+  // All cart entries (recipes + freeform) for the "In your cart" section
   const cartRecipes = useMemo(() => {
-    return (cartItems || []).filter(c => c.type !== "freeform" && c.recipeId).map(({ recipeId, servings: slotServings }) => {
+    return (cartItems || []).map(cartItem => {
+      if (cartItem.type === "freeform") {
+        const servings = servingOverrides[cartItem.text] ?? 1;
+        return { type: "freeform", key: cartItem.text, title: cartItem.text, baseServings: 1, servings };
+      }
+      const recipeId = cartItem.recipeId;
+      if (!recipeId) return null;
       const recipe = recipes.find(r => r.id === recipeId);
       if (!recipe) return null;
       const baseServings = parseServings(recipe.yield);
-      const servings = servingOverrides[recipeId] ?? slotServings ?? baseServings;
+      const servings = servingOverrides[recipeId] ?? cartItem.servings ?? baseServings;
       const effectiveTitle = recipeEdits[recipeId]?.title ?? recipe.title;
-      return { recipe, baseServings, servings, effectiveTitle };
+      return { type: "recipe", key: recipeId, recipe, baseServings, servings, effectiveTitle: effectiveTitle, title: effectiveTitle };
     }).filter(Boolean);
   }, [cartItems, recipes, recipeEdits, servingOverrides]);
 
@@ -2642,38 +2650,42 @@ function ShoppingListTab({ cartItems, recipes, recipeEdits, checkedItems, onSetC
           <div style={{ fontSize: 11, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, marginBottom: 10 }}>
             In your cart
           </div>
-          {cartRecipes.map(({ recipe, baseServings, servings, effectiveTitle }) => (
-            <div key={recipe.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, background: "#faf7f2", border: "1.5px solid #e8e0d4", borderRadius: 10, padding: "11px 16px", marginBottom: 8, flexWrap: "wrap" }}>
-              {/* Recipe name + remove */}
+          {cartRecipes.map(entry => (
+            <div key={entry.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, background: "#faf7f2", border: "1.5px solid #e8e0d4", borderRadius: 10, padding: "11px 16px", marginBottom: 8, flexWrap: "wrap" }}>
+              {/* Name + remove */}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, color: "#1c1915", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{effectiveTitle}</div>
+                  <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, color: "#1c1915", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {entry.type === "freeform" ? "✏️ " : ""}{entry.title}
+                  </div>
                   <button
-                    onClick={() => onRemoveFromCart(recipe.id)}
+                    onClick={() => onRemoveFromCart(entry.key)}
                     title="Remove from cart"
                     style={{ background: "none", border: "none", cursor: "pointer", color: "#c0b8ac", fontSize: 16, padding: "0 2px", lineHeight: 1, flexShrink: 0 }}
                   >×</button>
                 </div>
-                <div style={{ fontSize: 10, color: "#8a7f72", marginTop: 2 }}>base recipe: {baseServings} serving{baseServings !== 1 ? "s" : ""}</div>
+                <div style={{ fontSize: 10, color: "#8a7f72", marginTop: 2 }}>
+                  {entry.type === "freeform" ? "freeform · 1 batch" : `base recipe: ${entry.baseServings} serving${entry.baseServings !== 1 ? "s" : ""}`}
+                </div>
               </div>
               {/* Serving stepper */}
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                <span style={{ fontSize: 10, color: "#8a7f72", letterSpacing: "0.04em" }}>servings to cook</span>
+                <span style={{ fontSize: 10, color: "#8a7f72", letterSpacing: "0.04em" }}>{entry.type === "freeform" ? "batches" : "servings to cook"}</span>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <button
-                    onClick={() => setServings(recipe.id, servings - 1)}
-                    style={{ width: 26, height: 26, borderRadius: "50%", border: "1.5px solid #d4c9b8", background: "#fff", cursor: servings <= 1 ? "default" : "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", color: servings <= 1 ? "#d4c9b8" : "#8a7f72", padding: 0, lineHeight: 1, fontFamily: "inherit" }}
-                    disabled={servings <= 1}
+                    onClick={() => setServings(entry.key, entry.servings - 1)}
+                    style={{ width: 26, height: 26, borderRadius: "50%", border: "1.5px solid #d4c9b8", background: "#fff", cursor: entry.servings <= 1 ? "default" : "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", color: entry.servings <= 1 ? "#d4c9b8" : "#8a7f72", padding: 0, lineHeight: 1, fontFamily: "inherit" }}
+                    disabled={entry.servings <= 1}
                   >−</button>
-                  <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, fontWeight: 600, color: "#1c1915", minWidth: 28, textAlign: "center", lineHeight: 1 }}>{servings}</span>
+                  <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, fontWeight: 600, color: "#1c1915", minWidth: 28, textAlign: "center", lineHeight: 1 }}>{entry.servings}</span>
                   <button
-                    onClick={() => setServings(recipe.id, servings + 1)}
+                    onClick={() => setServings(entry.key, entry.servings + 1)}
                     style={{ width: 26, height: 26, borderRadius: "50%", border: "1.5px solid #d4c9b8", background: "#fff", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", color: "#8a7f72", padding: 0, lineHeight: 1, fontFamily: "inherit" }}
                   >+</button>
                 </div>
                 <button
-                  onClick={() => setServings(recipe.id, baseServings)}
-                  style={{ fontSize: 10, color: "#8a7f72", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline", fontFamily: "'DM Sans', sans-serif", visibility: servings !== baseServings ? "visible" : "hidden" }}
+                  onClick={() => setServings(entry.key, entry.baseServings)}
+                  style={{ fontSize: 10, color: "#8a7f72", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline", fontFamily: "'DM Sans', sans-serif", visibility: entry.servings !== entry.baseServings ? "visible" : "hidden" }}
                 >reset</button>
               </div>
             </div>
@@ -3127,8 +3139,11 @@ export default function MealPlannerApp() {
     });
   }
 
-  function removeFromCart(recipeId) {
-    setCartItems(prev => prev.filter(c => c.recipeId !== recipeId));
+  function removeFromCart(key) {
+    setCartItems(prev => prev.filter(c => {
+      if (c.type === "freeform") return c.text !== key;
+      return c.recipeId !== key;
+    }));
   }
 
   function clearCart() {
