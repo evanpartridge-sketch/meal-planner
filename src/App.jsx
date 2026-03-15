@@ -2449,6 +2449,15 @@ function CreateRecipeModal({ onSave, onClose }) {
   const [totalTime, setTotalTime] = useState("");
   const [ingredientsText, setIngredientsText] = useState("");
   const [instructionsText, setInstructionsText] = useState("");
+  const [imageDataUrl, setImageDataUrl] = useState(null);
+  const fileInputRef = useRef(null);
+
+  function handleImageFile(file) {
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = e => setImageDataUrl(e.target.result);
+    reader.readAsDataURL(file);
+  }
 
   useEffect(() => {
     function handleKey(e) { if (e.key === "Escape") onClose(); }
@@ -2472,6 +2481,7 @@ function CreateRecipeModal({ onSave, onClose }) {
       tags: [],
       rating: 0,
       timesCooked: 0,
+      ...(imageDataUrl ? { image: imageDataUrl } : {}),
     });
   }
 
@@ -2511,6 +2521,47 @@ function CreateRecipeModal({ onSave, onClose }) {
             New Recipe
           </h2>
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, color: "#8a7f72", cursor: "pointer", lineHeight: 1 }}>×</button>
+        </div>
+
+        {/* Image upload */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={e => handleImageFile(e.target.files[0])}
+        />
+        <div
+          onClick={() => fileInputRef.current?.click()}
+          onDragOver={e => { e.preventDefault(); }}
+          onDrop={e => { e.preventDefault(); handleImageFile(e.dataTransfer.files[0]); }}
+          style={{
+            width: "100%", height: imageDataUrl ? "auto" : 120,
+            border: "2px dashed #d4c9b8", borderRadius: 10,
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            cursor: "pointer", marginBottom: 20, overflow: "hidden",
+            background: imageDataUrl ? "transparent" : "#f5f0e8",
+            position: "relative",
+          }}
+        >
+          {imageDataUrl ? (
+            <>
+              <img src={imageDataUrl} alt="" style={{ width: "100%", maxHeight: 200, objectFit: "cover", display: "block", borderRadius: 8 }} />
+              <button
+                onClick={e => { e.stopPropagation(); setImageDataUrl(null); fileInputRef.current.value = ""; }}
+                style={{ position: "absolute", top: 8, right: 8, background: "rgba(0,0,0,0.55)", border: "none", borderRadius: 20, width: 26, height: 26, cursor: "pointer", color: "#fff", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}
+              >×</button>
+              <div
+                style={{ position: "absolute", bottom: 8, right: 8, background: "rgba(0,0,0,0.5)", color: "#fff", fontSize: 11, borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}
+              >Change</div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 28, marginBottom: 6 }}>🖼️</div>
+              <div style={{ fontSize: 13, color: "#8a7f72", fontWeight: 500 }}>Add a photo</div>
+              <div style={{ fontSize: 11, color: "#b0a898", marginTop: 2 }}>Click or drag & drop</div>
+            </>
+          )}
         </div>
 
         {/* Title */}
