@@ -3617,22 +3617,15 @@ export default function MealPlannerApp() {
                           );
                         })}
 
-                        {MEALS.map(meal => {
-                          const mealCals = getMealCalories(plan, meal, recipes);
-                          return (
+                        {MEALS.map(meal => (
                           <React.Fragment key={meal}>
                             <div style={{
-                              display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "center",
-                              paddingRight: 10, paddingTop: 6, gap: 2
+                              display: "flex", alignItems: "center", justifyContent: "flex-end",
+                              paddingRight: 10, paddingTop: 6
                             }}>
                               <span style={{ fontSize: 11, color: "#8a7f72", fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase" }}>
                                 {meal}
                               </span>
-                              {mealCals > 0 && (
-                                <span style={{ fontSize: 10, color: "#a09585", fontWeight: 400 }}>
-                                  {mealCals} cal
-                                </span>
-                              )}
                             </div>
                             {DAYS.map(day => {
                               const rawSlot = plan[day][meal];
@@ -3713,6 +3706,19 @@ export default function MealPlannerApp() {
                                         }
                                         return null;
                                       })}
+                                      {(() => {
+                                        const slotTotal = slotItems.reduce((sum, item) => {
+                                          if (item.type !== "recipe") return sum;
+                                          const r = getRecipe(item.recipeId, recipes);
+                                          const calBase = item.customCalories ?? r?.caloriesPerServing ?? null;
+                                          return calBase != null ? sum + Math.round(calBase * (item.servings || 1)) : sum;
+                                        }, 0);
+                                        return slotTotal > 0 ? (
+                                          <div style={{ fontSize: 10, fontWeight: 600, color: "#4a7c59", textAlign: "right", paddingRight: 2, marginTop: 2 }}>
+                                            {slotTotal} cal total
+                                          </div>
+                                        ) : null;
+                                      })()}
                                       <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
                                         <button
                                           onClick={() => setAddMealTarget({ day, meal })}
@@ -3738,7 +3744,7 @@ export default function MealPlannerApp() {
                               );
                             })}
                           </React.Fragment>
-                        ); })}
+                        ))}
                       </div>
                     </div>
 
