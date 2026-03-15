@@ -2216,6 +2216,8 @@ function ShoppingListTab({ cartItems, recipes, recipeEdits, checkedItems, onSetC
   const [addText, setAddText] = useState("");
   const [addExpanded, setAddExpanded] = useState(false);
   const [showBanner, setShowBanner] = useState(false);
+  const [consolidating, setConsolidating] = useState(false);
+  const [consolidatedItems, setConsolidatedItems] = useState(null); // null = show raw
   const undoTimer = useRef(null);
   const lastDeleted = useRef(null);
   const addInputRef = useRef(null);
@@ -2264,7 +2266,36 @@ function ShoppingListTab({ cartItems, recipes, recipeEdits, checkedItems, onSetC
     [cartItems, recipes, recipeEdits, manualItems, qtyOverrides, servingOverrides]
   );
 
-  const visibleItems = useMemo(() => allItems.filter(it => !hidden.has(it.key)), [allItems, hidden]);
+  async function consolidate() {
+    const rawTexts = allItems.map(it => it.text);
+    if (!rawTexts.length) return;
+    setConsolidating(true);
+    try {
+      const res = await fetch("/api/consolidate-shopping-list", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: rawTexts }),
+      });
+      const data = await res.json();
+      if (data.items) {
+        const formatted = data.items.map((text, i) => ({
+          key: `consolidated-${i}-${text}`,
+          text,
+          category: detectCategory(text),
+          isManual: false,
+          count: 1,
+        }));
+        setConsolidatedItems(formatted);
+      }
+    } catch (e) {
+      console.error("Consolidation failed", e);
+    } finally {
+      setConsolidating(false);
+    }
+  }
+
+  const displayItems = consolidatedItems !== null ? consolidatedItems : allItems;
+  const visibleItems = useMemo(() => displayItems.filter(it => !hidden.has(it.key)), [displayItems, hidden]);
   const activeItems  = useMemo(() => visibleItems.filter(it => !checkedItems[it.key]), [visibleItems, checkedItems]);
   const doneItems    = useMemo(() => visibleItems.filter(it => !!checkedItems[it.key]), [visibleItems, checkedItems]);
 
@@ -2353,6 +2384,7 @@ function ShoppingListTab({ cartItems, recipes, recipeEdits, checkedItems, onSetC
     setQtyOverrides({});
     setServingOverrides({});
     onClearCart();
+    setConsolidatedItems(null);
     localStorage.removeItem("mealplanner_manual_items");
     localStorage.removeItem("mealplanner_qty_overrides");
     localStorage.removeItem("mealplanner_hidden_items");
@@ -2380,7 +2412,22 @@ function ShoppingListTab({ cartItems, recipes, recipeEdits, checkedItems, onSetC
       {/* Header */}
       <div style={{ marginBottom: 20, display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <h1 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 36, fontWeight: 600, margin: 0 }}>Shopping List</h1>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {allItems.length > 0 && (
+            consolidatedItems !== null ? (
+              <button onClick={() => setConsolidatedItems(null)} style={{ ...smallBtn, color: "#c8a03c", borderColor: "#c8a03c" }}>
+                ↩ Raw list
+              </button>
+            ) : (
+              <button
+                onClick={consolidate}
+                disabled={consolidating}
+                style={{ ...smallBtn, background: consolidating ? "#f5f0e8" : "#1c1915", color: consolidating ? "#8a7f72" : "#fff", border: "none" }}
+              >
+                {consolidating ? "✨ Thinking…" : "✨ Smart list"}
+              </button>
+            )
+          )}
           <button onClick={copyList} style={smallBtn}>📋 Copy list</button>
           <button onClick={resetAll} style={smallBtn}>Reset all</button>
         </div>
