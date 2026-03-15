@@ -157,6 +157,37 @@ function generateShoppingItems(plan, recipes, recipeEdits, manualItems, qtyOverr
   return [...planItems, ...manualFormatted];
 }
 
+function generateShoppingItemsFromCart(cartItems, recipes, recipeEdits, manualItems, qtyOverrides, servingOverrides = {}) {
+  const itemMap = {};
+  (cartItems || []).forEach(({ recipeId, servings: slotServings }) => {
+    const r = recipes.find(rec => rec.id === recipeId);
+    if (!r) return;
+    const baseServings = parseServings(r.yield);
+    const targetServings = servingOverrides[recipeId] ?? slotServings ?? baseServings;
+    const ratio = baseServings > 0 ? targetServings / baseServings : 1;
+    const ings = recipeEdits[recipeId]?.ingredients ?? r.ingredients ?? [];
+    ings.forEach(ing => {
+      const key = ing.toLowerCase().trim();
+      if (!itemMap[key]) {
+        const scaledText = scaleIngredient(ing, ratio);
+        itemMap[key] = { key, origText: ing, scaledText, count: 0, isManual: false };
+      }
+      itemMap[key].count++;
+    });
+  });
+  const planItems = Object.values(itemMap).map(it => ({
+    ...it,
+    text: qtyOverrides[it.key] ?? it.scaledText,
+    category: detectCategory(it.origText),
+  }));
+  const manualFormatted = (manualItems || []).map(mi => ({
+    key: mi.id, origText: mi.text, scaledText: mi.text,
+    text: qtyOverrides[mi.id] ?? mi.text,
+    count: 1, isManual: true, category: detectCategory(mi.text),
+  }));
+  return [...planItems, ...manualFormatted];
+}
+
 // Legacy wrapper kept for calorie tab (not used for shopping display)
 function generateShoppingList(plan, recipes) {
   const ingredientMap = {};
@@ -1791,11 +1822,12 @@ function RecipeCalEditorModal({ recipe, recipeEdits, onAdd, onClose }) {
 
 // ─── BuildMealModal ────────────────────────────────────────────────────────────
 
-function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRecipe, onAddFreeform, onUpdateServings, onUpdateItemCals, onRemoveItem, onClose }) {
+function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRecipe, onAddFreeform, onUpdateServings, onUpdateItemCals, onRemoveItem, onAddToCart, onClose }) {
   const [innerTab, setInnerTab] = useState("library");
   const [libSearch, setLibSearch] = useState("");
   const [freeformText, setFreeformText] = useState("");
   const [calEditorIndex, setCalEditorIndex] = useState(null); // index into currentItems
+  const [cartAdded, setCartAdded] = useState(false);
 
   useEffect(() => {
     function handleKey(e) { if (e.key === "Escape") onClose(); }
@@ -1919,6 +1951,22 @@ function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRe
                 return null;
               })}
             </div>
+            {currentItems.some(i => i.type === "recipe") && (
+              <button
+                onClick={() => {
+                  onAddToCart(currentItems);
+                  setCartAdded(true);
+                  setTimeout(() => setCartAdded(false), 2000);
+                }}
+                style={{
+                  marginTop: 10, width: "100%", padding: "9px 0",
+                  background: cartAdded ? "#4a7c59" : "#1c1915",
+                  color: "#fff", border: "none", borderRadius: 8,
+                  fontSize: 13, fontWeight: 600, cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif", transition: "background 0.2s",
+                }}
+              >{cartAdded ? "✓ Added to cart!" : "🛒 Add to Shopping Cart"}</button>
+            )}
             <div style={{ borderBottom: "1px solid #e8e0d4", marginTop: 14 }} />
           </div>
         )}
@@ -2156,7 +2204,7 @@ function ShoppingItem({ item, checked, onToggle, onDelete, onAdjustQty, search }
 
 // ─── Shopping: Main Tab Component ─────────────────────────────────────────────
 
-function ShoppingListTab({ plan, recipes, recipeEdits, checkedItems, onSetCheckedItems }) {
+function ShoppingListTab({ cartItems, recipes, recipeEdits, checkedItems, onSetCheckedItems, onRemoveFromCart, onClearCart }) {
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(new Set());
   const [completedCollapsed, setCompletedCollapsed] = useState(true);
@@ -2193,25 +2241,17 @@ function ShoppingListTab({ plan, recipes, recipeEdits, checkedItems, onSetChecke
   useEffect(() => { localStorage.setItem("mealplanner_hidden_items", JSON.stringify([...hidden])); }, [hidden]);
   useEffect(() => { localStorage.setItem("mealplanner_serving_overrides", JSON.stringify(servingOverrides)); }, [servingOverrides]);
 
-  // Unique recipes planned this week with their serving counts
-  const weekRecipes = useMemo(() => {
-    const seen = new Set();
-    const result = [];
-    DAYS.forEach(day => {
-      MEALS.forEach(meal => {
-        const recipeId = plan[day]?.[meal];
-        if (!recipeId || seen.has(recipeId)) return;
-        seen.add(recipeId);
-        const recipe = recipes.find(r => r.id === recipeId);
-        if (!recipe) return;
-        const baseServings = parseServings(recipe.yield);
-        const servings = servingOverrides[recipeId] ?? baseServings;
-        const effectiveTitle = recipeEdits[recipeId]?.title ?? recipe.title;
-        result.push({ recipe, baseServings, servings, effectiveTitle });
-      });
-    });
-    return result;
-  }, [plan, recipes, recipeEdits, servingOverrides]);
+  // Recipes in the cart with their serving counts
+  const cartRecipes = useMemo(() => {
+    return (cartItems || []).map(({ recipeId, servings: slotServings }) => {
+      const recipe = recipes.find(r => r.id === recipeId);
+      if (!recipe) return null;
+      const baseServings = parseServings(recipe.yield);
+      const servings = servingOverrides[recipeId] ?? slotServings ?? baseServings;
+      const effectiveTitle = recipeEdits[recipeId]?.title ?? recipe.title;
+      return { recipe, baseServings, servings, effectiveTitle };
+    }).filter(Boolean);
+  }, [cartItems, recipes, recipeEdits, servingOverrides]);
 
   function setServings(recipeId, value) {
     setServingOverrides(s => ({ ...s, [recipeId]: Math.max(1, value) }));
@@ -2220,8 +2260,8 @@ function ShoppingListTab({ plan, recipes, recipeEdits, checkedItems, onSetChecke
   }
 
   const allItems = useMemo(
-    () => generateShoppingItems(plan, recipes, recipeEdits, manualItems, qtyOverrides, servingOverrides),
-    [plan, recipes, recipeEdits, manualItems, qtyOverrides, servingOverrides]
+    () => generateShoppingItemsFromCart(cartItems, recipes, recipeEdits, manualItems, qtyOverrides, servingOverrides),
+    [cartItems, recipes, recipeEdits, manualItems, qtyOverrides, servingOverrides]
   );
 
   const visibleItems = useMemo(() => allItems.filter(it => !hidden.has(it.key)), [allItems, hidden]);
@@ -2312,10 +2352,12 @@ function ShoppingListTab({ plan, recipes, recipeEdits, checkedItems, onSetChecke
     setManualItems([]);
     setQtyOverrides({});
     setServingOverrides({});
+    onClearCart();
     localStorage.removeItem("mealplanner_manual_items");
     localStorage.removeItem("mealplanner_qty_overrides");
     localStorage.removeItem("mealplanner_hidden_items");
     localStorage.removeItem("mealplanner_serving_overrides");
+    localStorage.removeItem("mealplanner_cart_items");
   }
 
   function toggleCollapse(catId) {
@@ -2357,17 +2399,24 @@ function ShoppingListTab({ plan, recipes, recipeEdits, checkedItems, onSetChecke
         )}
       </div>
 
-      {/* Recipes this week + serving controls */}
-      {weekRecipes.length > 0 && (
+      {/* Cart recipes + serving controls */}
+      {cartRecipes.length > 0 && (
         <div style={{ maxWidth: 720, marginBottom: 28 }}>
           <div style={{ fontSize: 11, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, marginBottom: 10 }}>
-            Recipes this week
+            In your cart
           </div>
-          {weekRecipes.map(({ recipe, baseServings, servings, effectiveTitle }) => (
+          {cartRecipes.map(({ recipe, baseServings, servings, effectiveTitle }) => (
             <div key={recipe.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, background: "#faf7f2", border: "1.5px solid #e8e0d4", borderRadius: 10, padding: "11px 16px", marginBottom: 8, flexWrap: "wrap" }}>
-              {/* Recipe name */}
+              {/* Recipe name + remove */}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 500, color: "#1c1915", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{effectiveTitle}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, color: "#1c1915", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{effectiveTitle}</div>
+                  <button
+                    onClick={() => onRemoveFromCart(recipe.id)}
+                    title="Remove from cart"
+                    style={{ background: "none", border: "none", cursor: "pointer", color: "#c0b8ac", fontSize: 16, padding: "0 2px", lineHeight: 1, flexShrink: 0 }}
+                  >×</button>
+                </div>
                 <div style={{ fontSize: 10, color: "#8a7f72", marginTop: 2 }}>base recipe: {baseServings} serving{baseServings !== 1 ? "s" : ""}</div>
               </div>
               {/* Serving stepper */}
@@ -2398,7 +2447,7 @@ function ShoppingListTab({ plan, recipes, recipeEdits, checkedItems, onSetChecke
 
       {/* Body */}
       {allItems.length === 0 ? (
-        <div style={{ color: "#8a7f72", fontSize: 14, textAlign: "center", paddingTop: 60 }}>Add meals to your planner to generate a shopping list.</div>
+        <div style={{ color: "#8a7f72", fontSize: 14, textAlign: "center", paddingTop: 60 }}>Open a meal slot in the Week Planner and tap "Add to Shopping Cart" to build your list.</div>
       ) : (
         <>
           {/* Category sections */}
@@ -2730,6 +2779,9 @@ export default function MealPlannerApp() {
   const [lastSyncTime, setLastSyncTime] = useState(null);
   const [addMealTarget, setAddMealTarget] = useState(null); // { day, meal } | null
   const [copySlotTarget, setCopySlotTarget] = useState(null); // { day, meal } | null
+  const [cartItems, setCartItems] = useState(() => {
+    try { const s = localStorage.getItem("mealplanner_cart_items"); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
 
   const plan = plans[weekOffset] ?? EMPTY_PLAN;
 
@@ -2807,6 +2859,35 @@ export default function MealPlannerApp() {
   useEffect(() => {
     localStorage.setItem("mealPlannerState", JSON.stringify({ plans, checkedItems, calorieGoal }));
   }, [plans, checkedItems, calorieGoal]);
+
+  useEffect(() => {
+    localStorage.setItem("mealplanner_cart_items", JSON.stringify(cartItems));
+  }, [cartItems]);
+
+  function addToCart(slotItems) {
+    const recipeItems = slotItems.filter(i => i.type === "recipe");
+    if (!recipeItems.length) return;
+    setCartItems(prev => {
+      const next = [...prev];
+      recipeItems.forEach(item => {
+        const existing = next.find(c => c.recipeId === item.recipeId);
+        if (existing) {
+          existing.servings = (existing.servings || 1) + (item.servings || 1);
+        } else {
+          next.push({ recipeId: item.recipeId, servings: item.servings || 1 });
+        }
+      });
+      return next;
+    });
+  }
+
+  function removeFromCart(recipeId) {
+    setCartItems(prev => prev.filter(c => c.recipeId !== recipeId));
+  }
+
+  function clearCart() {
+    setCartItems([]);
+  }
 
   function handleSignIn(accessToken) {
     setToken(accessToken);
@@ -3455,6 +3536,7 @@ export default function MealPlannerApp() {
           }}
           onUpdateServings={(index, servings) => updateSlotItemServings(addMealTarget.day, addMealTarget.meal, index, servings)}
           onRemoveItem={index => removeFromPlan(addMealTarget.day, addMealTarget.meal, index)}
+          onAddToCart={items => addToCart(items)}
           onClose={() => setAddMealTarget(null)}
         />
       )}
@@ -4091,11 +4173,13 @@ export default function MealPlannerApp() {
                 {/* ── SHOPPING LIST ── */}
                 {activeTab === "shopping" && (
                   <ShoppingListTab
-                    plan={plan}
+                    cartItems={cartItems}
                     recipes={recipes}
                     recipeEdits={recipeEdits}
                     checkedItems={checkedItems}
                     onSetCheckedItems={setCheckedItems}
+                    onRemoveFromCart={removeFromCart}
+                    onClearCart={clearCart}
                   />
                 )}
 
