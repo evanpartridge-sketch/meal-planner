@@ -499,6 +499,8 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
   const [draftTags, setDraftTags] = useState([]);
   const [newTagInput, setNewTagInput] = useState("");
   const [draftCalorieLines, setDraftCalorieLines] = useState([]); // [{ label, cal }]
+  const [draftImage, setDraftImage] = useState(null); // null = no change; "" = removed; data-url = new image
+  const imageEditRef = useRef(null);
 
   const ratio = origServings > 0 ? servingCount / origServings : 1;
 
@@ -529,10 +531,12 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
           return { label: calMatch ? l.slice(0, l.lastIndexOf(":")).trim() : l.trim(), cal: calMatch ? parseInt(calMatch[1], 10) : 0 };
         })
     );
+    setDraftImage(edits?.image ?? recipe.image ?? null);
     setEditMode(true);
   }
 
   function cancelEdit() {
+    setDraftImage(null);
     setEditMode(false);
   }
 
@@ -591,7 +595,9 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
         `Total: ${calTotal} cal ÷ ${calServings} servings = ${calPerServing} / serving`,
       ].join("\n");
     }
+    if (draftImage !== null) newEdits.image = draftImage || undefined;
     onSaveEdits(newEdits);
+    setDraftImage(null);
     setEditMode(false);
   }
 
@@ -642,9 +648,25 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
       >
         {/* ── Hero ── */}
         <div style={{ position: "relative" }}>
-          {recipe.image ? (
+          {/* Hidden file input for edit mode */}
+          {editMode && (
+            <input
+              ref={imageEditRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={e => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = ev => setDraftImage(ev.target.result);
+                reader.readAsDataURL(file);
+              }}
+            />
+          )}
+          {(editMode ? draftImage : recipe.image) ? (
             <img
-              src={recipe.image}
+              src={editMode ? draftImage : recipe.image}
               alt={recipe.title}
               style={{ width: "100%", height: 300, objectFit: "cover", borderRadius: "14px 14px 0 0", display: "block" }}
             />
@@ -657,6 +679,22 @@ function RecipeDetail({ recipe, onClose, onRate, onMarkCooked, onEstimateCalorie
             }}>
               {recipeEmoji(recipe.id)}
             </div>
+          )}
+          {/* Edit mode: photo button */}
+          {editMode && (
+            <button
+              onClick={() => imageEditRef.current?.click()}
+              style={{
+                position: "absolute", bottom: 12, left: 12,
+                background: "rgba(0,0,0,0.55)", border: "none", borderRadius: 8,
+                color: "#fff", fontSize: 13, fontWeight: 500,
+                padding: "7px 14px", cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 6,
+                backdropFilter: "blur(4px)",
+              }}
+            >
+              📷 {draftImage ? "Change photo" : "Add photo"}
+            </button>
           )}
           {/* Close button */}
           <button
