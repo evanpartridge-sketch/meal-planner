@@ -35,7 +35,7 @@ function getDayCalories(dayPlan, recipes) {
     return sum + arr.reduce((s, item) => {
       if (item.type !== "recipe") return s;
       const r = getRecipe(item.recipeId, recipes);
-      return s + (r?.caloriesPerServing || 0) * (item.servings || 1);
+      return s + (item.customCalories ?? r?.caloriesPerServing ?? 0) * (item.servings || 1);
     }, 0);
   }, 0);
 }
@@ -1468,12 +1468,162 @@ function FreeformSlotItem({ text, onSave, onRemove }) {
   );
 }
 
+// ─── RecipeCalEditorModal ──────────────────────────────────────────────────────
+
+function RecipeCalEditorModal({ recipe, recipeEdits, onAdd, onClose }) {
+  const reasoning = recipeEdits?.[recipe.id]?.calorieReasoning ?? recipe.calorieReasoning ?? "";
+  const baseYield = recipeEdits?.[recipe.id]?.yield ?? recipe.yield ?? "";
+  const recipeServings = parseServings(baseYield) || 1;
+  const baseCalPerServing = recipeEdits?.[recipe.id]?.caloriesPerServing ?? recipe.caloriesPerServing ?? null;
+  const title = recipeEdits?.[recipe.id]?.title ?? recipe.title ?? "";
+
+  const parsedLines = reasoning.split("\n")
+    .filter(l => l.trim().startsWith("•"))
+    .map(l => {
+      const calMatch = l.match(/:\s*(\d+)\s*cal\s*$/i);
+      return {
+        label: calMatch ? l.slice(0, l.lastIndexOf(":")).trim() : l.trim(),
+        cal: calMatch ? parseInt(calMatch[1], 10) : 0,
+      };
+    });
+
+  const [lines, setLines] = useState(() => parsedLines.map(l => ({ ...l, enabled: true })));
+  const [singleCal, setSingleCal] = useState(baseCalPerServing ?? 0);
+
+  const hasBreakdown = lines.length > 0;
+  const totalCal = hasBreakdown
+    ? lines.reduce((s, l) => s + (l.enabled ? (l.cal || 0) : 0), 0)
+    : singleCal * recipeServings;
+  const calPerServing = hasBreakdown ? Math.round(totalCal / recipeServings) : Math.round(singleCal);
+  const unchanged = hasBreakdown
+    ? lines.every(l => l.enabled) && lines.every((l, i) => l.cal === parsedLines[i]?.cal)
+    : singleCal === (baseCalPerServing ?? 0);
+
+  useEffect(() => {
+    function handleKey(e) { if (e.key === "Escape") onClose(); }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  function updateCal(idx, val) {
+    setLines(prev => prev.map((l, i) => i === idx ? { ...l, cal: Math.max(0, val) } : l));
+  }
+  function toggleLine(idx) {
+    setLines(prev => prev.map((l, i) => i === idx ? { ...l, enabled: !l.enabled } : l));
+  }
+
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ background: "#faf7f2", borderRadius: 16, width: "90%", maxWidth: 480, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 64px rgba(0,0,0,0.35)", overflow: "hidden" }}
+      >
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "18px 18px 14px", borderBottom: "1px solid #e8e0d4", flexShrink: 0 }}>
+          <div style={{ width: 52, height: 52, borderRadius: 8, overflow: "hidden", flexShrink: 0, background: "linear-gradient(135deg, #2a2420, #3d3128)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24 }}>
+            {recipe.image
+              ? <img src={recipe.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              : recipeEmoji(recipe.id)}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, fontWeight: 700, color: "#1c1915", lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
+            <div style={{ fontSize: 12, color: "#8a7f72", marginTop: 2 }}>
+              {hasBreakdown ? `${lines.filter(l => l.enabled).length} of ${lines.length} ingredients · ` : ""}
+              {calPerServing != null ? `${calPerServing} cal/serving` : "No calorie data"}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "rgba(0,0,0,0.06)", border: "none", borderRadius: 20, width: 30, height: 30, cursor: "pointer", fontSize: 17, color: "#8a7f72", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>×</button>
+        </div>
+
+        {/* Body */}
+        <div style={{ overflowY: "auto", flex: 1, padding: "14px 18px" }}>
+          {hasBreakdown ? (
+            <>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>Calorie Breakdown</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {lines.map((line, idx) => (
+                  <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, background: line.enabled ? "#fff" : "#f0ece6", border: "1.5px solid", borderColor: line.enabled ? "#e8e0d4" : "#e0d8cc", opacity: line.enabled ? 1 : 0.55 }}>
+                    <input
+                      type="checkbox"
+                      checked={line.enabled}
+                      onChange={() => toggleLine(idx)}
+                      style={{ cursor: "pointer", accentColor: "#4a7c59", width: 15, height: 15, flexShrink: 0 }}
+                    />
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: line.enabled ? "#1c1915" : "#8a7f72", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: line.enabled ? "none" : "line-through" }}>
+                      {line.label.replace(/^•\s*/, "")}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                      <input
+                        type="number"
+                        min={0}
+                        value={line.cal}
+                        disabled={!line.enabled}
+                        onChange={e => updateCal(idx, parseInt(e.target.value) || 0)}
+                        style={{ width: 52, border: "1.5px solid #e8e0d4", borderRadius: 6, padding: "3px 6px", fontSize: 12, fontFamily: "'DM Sans', sans-serif", color: "#1c1915", background: line.enabled ? "#fff" : "#f0ece6", outline: "none", textAlign: "right" }}
+                      />
+                      <span style={{ fontSize: 11, color: "#8a7f72", width: 20 }}>cal</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* Total row */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, padding: "10px 10px", background: "#f0ece6", borderRadius: 8, border: "1.5px solid #e0d8cc" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#1c1915" }}>
+                  Total ({lines.filter(l => l.enabled).length} ingredients)
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#1c1915" }}>
+                  {totalCal} cal
+                  {recipeServings > 1 && <span style={{ fontSize: 11, color: "#8a7f72", fontWeight: 400 }}> ÷ {recipeServings} = {calPerServing} / serving</span>}
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>Calories per Serving</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="number"
+                  min={0}
+                  value={singleCal}
+                  onChange={e => setSingleCal(parseInt(e.target.value) || 0)}
+                  style={{ width: 80, border: "1.5px solid #e8e0d4", borderRadius: 8, padding: "8px 10px", fontSize: 16, fontFamily: "'DM Sans', sans-serif", color: "#1c1915", background: "#fff", outline: "none", textAlign: "right" }}
+                />
+                <span style={{ fontSize: 13, color: "#8a7f72" }}>cal / serving</span>
+              </div>
+              {baseCalPerServing == null && (
+                <div style={{ marginTop: 10, fontSize: 12, color: "#a09080" }}>No calorie data on this recipe — enter an estimate above.</div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: "14px 18px", borderTop: "1px solid #e8e0d4", flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          <div style={{ fontSize: 12, color: "#8a7f72" }}>
+            {!unchanged && <span style={{ color: "#c8a03c", fontWeight: 500 }}>✦ Custom calories for this meal only</span>}
+          </div>
+          <button
+            onClick={() => onAdd(calPerServing)}
+            style={{ background: "#1c1915", color: "#f5f0e8", border: "none", borderRadius: 8, padding: "9px 20px", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", flexShrink: 0 }}
+          >
+            Add to Meal — {calPerServing} cal/serving
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── BuildMealModal ────────────────────────────────────────────────────────────
 
 function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRecipe, onAddFreeform, onUpdateServings, onRemoveItem, onClose }) {
   const [innerTab, setInnerTab] = useState("library");
   const [libSearch, setLibSearch] = useState("");
   const [freeformText, setFreeformText] = useState("");
+  const [calEditorRecipe, setCalEditorRecipe] = useState(null);
 
   useEffect(() => {
     function handleKey(e) { if (e.key === "Escape") onClose(); }
@@ -1556,7 +1706,8 @@ function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRe
                   if (!recipe) return null;
                   const title = recipeEdits?.[recipe.id]?.title ?? recipe.title ?? "";
                   const servings = item.servings || 1;
-                  const totalCal = recipe.caloriesPerServing ? Math.round(recipe.caloriesPerServing * servings) : null;
+                  const calBase = item.customCalories ?? recipe.caloriesPerServing ?? null;
+                  const totalCal = calBase != null ? Math.round(calBase * servings) : null;
                   return (
                     <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", border: "1.5px solid #e8e0d4", borderRadius: 8, padding: "8px 10px" }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -1567,6 +1718,7 @@ function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRe
                           <div style={{ fontSize: 11, color: "#8a7f72", marginTop: 1 }}>
                             {totalCal} cal
                             {servings !== 1 && <span style={{ color: "#c0b8ac" }}> ({servings} serving{servings !== 1 ? "s" : ""})</span>}
+                            {item.customCalories != null && <span style={{ color: "#c8a03c", marginLeft: 4 }}>✦ custom</span>}
                           </div>
                         )}
                       </div>
@@ -1650,7 +1802,7 @@ function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRe
                   {filtered.map(recipe => (
                     <div
                       key={recipe.id}
-                      onClick={() => onSelectRecipe(recipe)}
+                      onClick={() => setCalEditorRecipe(recipe)}
                       className="picker-card"
                       style={{ background: "#fff", border: "1.5px solid #e8e0d4", borderRadius: 10, overflow: "hidden", cursor: "pointer" }}
                     >
@@ -1712,6 +1864,19 @@ function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRe
           </div>
         )}
       </div>
+
+      {/* Recipe calorie editor sub-modal */}
+      {calEditorRecipe && (
+        <RecipeCalEditorModal
+          recipe={calEditorRecipe}
+          recipeEdits={recipeEdits}
+          onAdd={customCals => {
+            onSelectRecipe(calEditorRecipe, customCals);
+            setCalEditorRecipe(null);
+          }}
+          onClose={() => setCalEditorRecipe(null)}
+        />
+      )}
     </div>
   );
 }
@@ -3030,8 +3195,11 @@ export default function MealPlannerApp() {
             const raw = plans[weekOffset]?.[addMealTarget.day]?.[addMealTarget.meal];
             return Array.isArray(raw) ? raw : (typeof raw === "string" ? [{ type: "recipe", recipeId: raw }] : []);
           })()}
-          onSelectRecipe={recipe => {
-            addToPlan(addMealTarget.day, addMealTarget.meal, { type: "recipe", recipeId: recipe.id, servings: 1 });
+          onSelectRecipe={(recipe, customCals) => {
+            addToPlan(addMealTarget.day, addMealTarget.meal, {
+              type: "recipe", recipeId: recipe.id, servings: 1,
+              ...(customCals != null ? { customCalories: customCals } : {}),
+            });
           }}
           onAddFreeform={text => {
             addToPlan(addMealTarget.day, addMealTarget.meal, { type: "freeform", text });
@@ -3232,7 +3400,8 @@ export default function MealPlannerApp() {
                                           if (!recipe) return null;
                                           const title = recipeEdits[recipe.id]?.title ?? recipe.title ?? "";
                                           const servings = item.servings || 1;
-                                          const dispCal = recipe.caloriesPerServing ? Math.round(recipe.caloriesPerServing * servings) : null;
+                                          const calBase = item.customCalories ?? recipe.caloriesPerServing ?? null;
+                                          const dispCal = calBase != null ? Math.round(calBase * servings) : null;
                                           return (
                                             <div key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 4, minWidth: 0 }}>
                                               <div
