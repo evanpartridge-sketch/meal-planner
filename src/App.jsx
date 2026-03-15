@@ -40,6 +40,19 @@ function getDayCalories(dayPlan, recipes) {
   }, 0);
 }
 
+function getMealCalories(plan, meal, recipes) {
+  return DAYS.reduce((sum, day) => {
+    const slot = plan[day]?.[meal];
+    if (!slot) return sum;
+    const arr = Array.isArray(slot) ? slot : [{ type: "recipe", recipeId: slot }];
+    return sum + arr.reduce((s, item) => {
+      if (item.type !== "recipe") return s;
+      const r = getRecipe(item.recipeId, recipes);
+      return s + (item.customCalories ?? r?.caloriesPerServing ?? 0) * (item.servings || 1);
+    }, 0);
+  }, 0);
+}
+
 // ─── Shopping List Helpers ────────────────────────────────────────────────────
 
 const CATEGORIES = [
@@ -3604,15 +3617,22 @@ export default function MealPlannerApp() {
                           );
                         })}
 
-                        {MEALS.map(meal => (
+                        {MEALS.map(meal => {
+                          const mealCals = getMealCalories(plan, meal, recipes);
+                          return (
                           <React.Fragment key={meal}>
                             <div style={{
-                              display: "flex", alignItems: "center", justifyContent: "flex-end",
-                              paddingRight: 10, paddingTop: 6
+                              display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "center",
+                              paddingRight: 10, paddingTop: 6, gap: 2
                             }}>
                               <span style={{ fontSize: 11, color: "#8a7f72", fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase" }}>
                                 {meal}
                               </span>
+                              {mealCals > 0 && (
+                                <span style={{ fontSize: 10, color: "#a09585", fontWeight: 400 }}>
+                                  {mealCals} cal
+                                </span>
+                              )}
                             </div>
                             {DAYS.map(day => {
                               const rawSlot = plan[day][meal];
@@ -3718,7 +3738,7 @@ export default function MealPlannerApp() {
                               );
                             })}
                           </React.Fragment>
-                        ))}
+                        ); })}
                       </div>
                     </div>
 
