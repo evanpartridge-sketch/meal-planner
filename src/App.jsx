@@ -3543,11 +3543,30 @@ export default function MealPlannerApp() {
   }
 
   function saveRecipeEdits(recipeId, edits) {
-    setRecipeEdits(prev => {
-      const updated = { ...prev, [recipeId]: edits };
-      localStorage.setItem("mealplanner_recipe_edits", JSON.stringify(updated));
-      return updated;
-    });
+    const isCustom = recipes.some(r => r.id === recipeId && r.isCustom);
+    if (isCustom) {
+      // Bake edits directly into the custom recipe object so cards always reflect the latest values
+      setRecipes(prev => {
+        const updated = prev.map(r => r.id === recipeId ? { ...r, ...edits } : r);
+        localStorage.setItem("mealplanner_custom_recipes", JSON.stringify(updated.filter(r => r.isCustom)));
+        return updated;
+      });
+      // Clear any stale recipeEdits entry for this recipe
+      setRecipeEdits(prev => {
+        if (!prev[recipeId]) return prev;
+        const updated = { ...prev };
+        delete updated[recipeId];
+        localStorage.setItem("mealplanner_recipe_edits", JSON.stringify(updated));
+        return updated;
+      });
+    } else {
+      // Non-custom recipes: store in recipeEdits overlay, synced to Drive on next push
+      setRecipeEdits(prev => {
+        const updated = { ...prev, [recipeId]: edits };
+        localStorage.setItem("mealplanner_recipe_edits", JSON.stringify(updated));
+        return updated;
+      });
+    }
   }
 
   function createRecipe(recipe) {
@@ -4398,11 +4417,11 @@ export default function MealPlannerApp() {
 
                           <div style={{ padding: "14px 16px" }}>
                             <div style={{ display: "flex", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
-                              {recipe.times?.["total time"] && (
-                                <span style={{ fontSize: 11, color: "#8a7f72" }}>⏱ {recipe.times["total time"]}</span>
+                              {(recipeEdits[recipe.id]?.times ?? recipe.times)?.["total time"] && (
+                                <span style={{ fontSize: 11, color: "#8a7f72" }}>⏱ {(recipeEdits[recipe.id]?.times ?? recipe.times)["total time"]}</span>
                               )}
-                              {recipe.yield && (
-                                <span style={{ fontSize: 11, color: "#8a7f72" }}>👤 {recipe.yield}</span>
+                              {(recipeEdits[recipe.id]?.yield ?? recipe.yield) && (
+                                <span style={{ fontSize: 11, color: "#8a7f72" }}>👤 {recipeEdits[recipe.id]?.yield ?? recipe.yield}</span>
                               )}
                               {recipe.timesCooked > 0 && (
                                 <span style={{ fontSize: 11, color: "#4a7c59" }}>✓ Made {recipe.timesCooked}×</span>
