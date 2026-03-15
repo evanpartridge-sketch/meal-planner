@@ -1619,11 +1619,11 @@ function RecipeCalEditorModal({ recipe, recipeEdits, onAdd, onClose }) {
 
 // ─── BuildMealModal ────────────────────────────────────────────────────────────
 
-function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRecipe, onAddFreeform, onUpdateServings, onRemoveItem, onClose }) {
+function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRecipe, onAddFreeform, onUpdateServings, onUpdateItemCals, onRemoveItem, onClose }) {
   const [innerTab, setInnerTab] = useState("library");
   const [libSearch, setLibSearch] = useState("");
   const [freeformText, setFreeformText] = useState("");
-  const [calEditorRecipe, setCalEditorRecipe] = useState(null);
+  const [calEditorIndex, setCalEditorIndex] = useState(null); // index into currentItems
 
   useEffect(() => {
     function handleKey(e) { if (e.key === "Escape") onClose(); }
@@ -1710,7 +1710,7 @@ function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRe
                   const totalCal = calBase != null ? Math.round(calBase * servings) : null;
                   return (
                     <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", border: "1.5px solid #e8e0d4", borderRadius: 8, padding: "8px 10px" }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
+                      <div onClick={() => setCalEditorIndex(idx)} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
                         <div style={{ fontSize: 13, fontWeight: 500, color: "#1c1915", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {recipeEmoji(recipe.id)} {title}
                         </div>
@@ -1718,7 +1718,7 @@ function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRe
                           <div style={{ fontSize: 11, color: "#8a7f72", marginTop: 1 }}>
                             {totalCal} cal
                             {servings !== 1 && <span style={{ color: "#c0b8ac" }}> ({servings} serving{servings !== 1 ? "s" : ""})</span>}
-                            {item.customCalories != null && <span style={{ color: "#c8a03c", marginLeft: 4 }}>✦ custom</span>}
+                            {item.customCalories != null ? <span style={{ color: "#c8a03c", marginLeft: 4 }}>✦ custom</span> : <span style={{ color: "#c0b8ac", marginLeft: 4 }}>edit</span>}
                           </div>
                         )}
                       </div>
@@ -1802,7 +1802,7 @@ function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRe
                   {filtered.map(recipe => (
                     <div
                       key={recipe.id}
-                      onClick={() => setCalEditorRecipe(recipe)}
+                      onClick={() => onSelectRecipe(recipe)}
                       className="picker-card"
                       style={{ background: "#fff", border: "1.5px solid #e8e0d4", borderRadius: 10, overflow: "hidden", cursor: "pointer" }}
                     >
@@ -1865,18 +1865,23 @@ function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRe
         )}
       </div>
 
-      {/* Recipe calorie editor sub-modal */}
-      {calEditorRecipe && (
-        <RecipeCalEditorModal
-          recipe={calEditorRecipe}
-          recipeEdits={recipeEdits}
-          onAdd={customCals => {
-            onSelectRecipe(calEditorRecipe, customCals);
-            setCalEditorRecipe(null);
-          }}
-          onClose={() => setCalEditorRecipe(null)}
-        />
-      )}
+      {/* Recipe calorie editor sub-modal (editing an item already in Your Meal) */}
+      {calEditorIndex != null && currentItems[calEditorIndex]?.type === "recipe" && (() => {
+        const item = currentItems[calEditorIndex];
+        const recipe = recipes.find(r => r.id === item.recipeId);
+        if (!recipe) return null;
+        return (
+          <RecipeCalEditorModal
+            recipe={recipe}
+            recipeEdits={recipeEdits}
+            onAdd={customCals => {
+              onUpdateItemCals(calEditorIndex, customCals);
+              setCalEditorIndex(null);
+            }}
+            onClose={() => setCalEditorIndex(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -2914,6 +2919,15 @@ export default function MealPlannerApp() {
     });
   }
 
+  function updateSlotItemCustomCals(day, meal, index, customCalories) {
+    setPlans(prev => {
+      const cur = prev[weekOffset] ?? EMPTY_PLAN;
+      const arr = [...(Array.isArray(cur[day]?.[meal]) ? cur[day][meal] : [])];
+      arr[index] = { ...arr[index], customCalories };
+      return { ...prev, [weekOffset]: { ...cur, [day]: { ...cur[day], [meal]: arr } } };
+    });
+  }
+
   function addToPlan(day, meal, item) {
     setPlans(prev => {
       const cur = prev[weekOffset] ?? EMPTY_PLAN;
@@ -3195,12 +3209,10 @@ export default function MealPlannerApp() {
             const raw = plans[weekOffset]?.[addMealTarget.day]?.[addMealTarget.meal];
             return Array.isArray(raw) ? raw : (typeof raw === "string" ? [{ type: "recipe", recipeId: raw }] : []);
           })()}
-          onSelectRecipe={(recipe, customCals) => {
-            addToPlan(addMealTarget.day, addMealTarget.meal, {
-              type: "recipe", recipeId: recipe.id, servings: 1,
-              ...(customCals != null ? { customCalories: customCals } : {}),
-            });
+          onSelectRecipe={recipe => {
+            addToPlan(addMealTarget.day, addMealTarget.meal, { type: "recipe", recipeId: recipe.id, servings: 1 });
           }}
+          onUpdateItemCals={(index, customCals) => updateSlotItemCustomCals(addMealTarget.day, addMealTarget.meal, index, customCals)}
           onAddFreeform={text => {
             addToPlan(addMealTarget.day, addMealTarget.meal, { type: "freeform", text });
           }}
