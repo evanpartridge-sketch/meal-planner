@@ -1580,9 +1580,25 @@ function RecipeCalEditorModal({ recipe, recipeEdits, onAdd, onClose }) {
     .filter(l => l.trim().startsWith("•"))
     .map(l => {
       const calMatch = l.match(/:\s*(\d+)\s*cal\s*$/i);
+      const totalIngCal = calMatch ? parseInt(calMatch[1], 10) : 0;
+      const rawLabel = calMatch ? l.slice(0, l.lastIndexOf(":")).trim() : l.trim();
+      // Parse per-serving ingredient amount from parenthetical e.g. "(1.25 lbs)"
+      const cleanLabel = rawLabel.replace(/^•\s*/, "");
+      const parenMatch = cleanLabel.match(/\(([^)]+)\)\s*$/);
+      let perServingAmt = null;
+      if (parenMatch && recipeServings > 1) {
+        const inside = parenMatch[1];
+        const numMatch = inside.match(/^([\d.]+)/);
+        if (numMatch) {
+          const qty = parseFloat(numMatch[1]);
+          const unit = inside.slice(numMatch[0].length).trim();
+          if (!isNaN(qty)) perServingAmt = formatQty(qty / recipeServings) + (unit ? " " + unit : "");
+        }
+      }
       return {
-        label: calMatch ? l.slice(0, l.lastIndexOf(":")).trim() : l.trim(),
-        cal: calMatch ? parseInt(calMatch[1], 10) : 0,
+        label: rawLabel,
+        cal: Math.round(totalIngCal / recipeServings), // store as cal/serving
+        perServingAmt,
       };
     });
 
@@ -1590,10 +1606,10 @@ function RecipeCalEditorModal({ recipe, recipeEdits, onAdd, onClose }) {
   const [singleCal, setSingleCal] = useState(baseCalPerServing ?? 0);
 
   const hasBreakdown = lines.length > 0;
-  const totalCal = hasBreakdown
+  // lines.cal is already per-serving, so sum directly
+  const calPerServing = hasBreakdown
     ? lines.reduce((s, l) => s + (l.enabled ? (l.cal || 0) : 0), 0)
-    : singleCal * recipeServings;
-  const calPerServing = hasBreakdown ? Math.round(totalCal / recipeServings) : Math.round(singleCal);
+    : Math.round(singleCal);
   const unchanged = hasBreakdown
     ? lines.every(l => l.enabled) && lines.every((l, i) => l.cal === parsedLines[i]?.cal)
     : singleCal === (baseCalPerServing ?? 0);
@@ -1651,8 +1667,15 @@ function RecipeCalEditorModal({ recipe, recipeEdits, onAdd, onClose }) {
                       onChange={() => toggleLine(idx)}
                       style={{ cursor: "pointer", accentColor: "#4a7c59", width: 15, height: 15, flexShrink: 0 }}
                     />
-                    <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: line.enabled ? "#1c1915" : "#8a7f72", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: line.enabled ? "none" : "line-through" }}>
-                      {line.label.replace(/^•\s*/, "")}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, color: line.enabled ? "#1c1915" : "#8a7f72", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: line.enabled ? "none" : "line-through" }}>
+                        {line.label.replace(/^•\s*/, "")}
+                      </div>
+                      {line.perServingAmt && (
+                        <div style={{ fontSize: 10, color: "#a09080", marginTop: 1 }}>
+                          {line.perServingAmt} / serving
+                        </div>
+                      )}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
                       <input
@@ -1663,7 +1686,7 @@ function RecipeCalEditorModal({ recipe, recipeEdits, onAdd, onClose }) {
                         onChange={e => updateCal(idx, parseInt(e.target.value) || 0)}
                         style={{ width: 52, border: "1.5px solid #e8e0d4", borderRadius: 6, padding: "3px 6px", fontSize: 12, fontFamily: "'DM Sans', sans-serif", color: "#1c1915", background: line.enabled ? "#fff" : "#f0ece6", outline: "none", textAlign: "right" }}
                       />
-                      <span style={{ fontSize: 11, color: "#8a7f72", width: 20 }}>cal</span>
+                      <span style={{ fontSize: 10, color: "#8a7f72", whiteSpace: "nowrap" }}>cal/srv</span>
                     </div>
                   </div>
                 ))}
@@ -1674,8 +1697,7 @@ function RecipeCalEditorModal({ recipe, recipeEdits, onAdd, onClose }) {
                   Total ({lines.filter(l => l.enabled).length} ingredients)
                 </div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: "#1c1915" }}>
-                  {totalCal} cal
-                  {recipeServings > 1 && <span style={{ fontSize: 11, color: "#8a7f72", fontWeight: 400 }}> ÷ {recipeServings} = {calPerServing} / serving</span>}
+                  {calPerServing} cal / serving
                 </div>
               </div>
             </>
