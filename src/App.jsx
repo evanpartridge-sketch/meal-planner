@@ -1468,6 +1468,105 @@ function FreeformSlotItem({ text, onSave, onRemove }) {
   );
 }
 
+// ─── CopyMealModal ─────────────────────────────────────────────────────────────
+
+function CopyMealModal({ target, plans, weekOffset, recipes, recipeEdits, onCopy, onClose }) {
+  const [selectedDays, setSelectedDays] = useState([]);
+
+  useEffect(() => {
+    function handleKey(e) { if (e.key === "Escape") onClose(); }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  const weekPlan = plans[weekOffset] ?? {};
+  const sourceItems = Array.isArray(weekPlan[target.day]?.[target.meal])
+    ? weekPlan[target.day][target.meal]
+    : [];
+
+  function toggle(day) {
+    setSelectedDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]);
+  }
+
+  const otherDays = DAYS.filter(d => d !== target.day);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ background: "#faf7f2", borderRadius: 16, width: "90%", maxWidth: 400, display: "flex", flexDirection: "column", boxShadow: "0 24px 64px rgba(0,0,0,0.3)", overflow: "hidden" }}
+      >
+        {/* Header */}
+        <div style={{ padding: "18px 20px 14px", borderBottom: "1px solid #e8e0d4" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, fontWeight: 700, color: "#1c1915" }}>
+                Copy {target.meal}
+              </div>
+              <div style={{ fontSize: 13, color: "#8a7f72", marginTop: 2 }}>
+                From {target.day} · {sourceItems.length} item{sourceItems.length !== 1 ? "s" : ""}
+              </div>
+            </div>
+            <button onClick={onClose} style={{ background: "rgba(0,0,0,0.06)", border: "none", borderRadius: 20, width: 30, height: 30, cursor: "pointer", fontSize: 17, color: "#8a7f72", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+          </div>
+          {/* Source items preview */}
+          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 3 }}>
+            {sourceItems.map((item, i) => {
+              if (item.type === "recipe") {
+                const r = recipes.find(rec => rec.id === item.recipeId);
+                if (!r) return null;
+                return <div key={i} style={{ fontSize: 12, color: "#5a5248" }}>{recipeEmoji(r.id)} {recipeEdits?.[r.id]?.title ?? r.title}</div>;
+              }
+              if (item.type === "freeform") return <div key={i} style={{ fontSize: 12, color: "#5a5248" }}>✏️ {item.text}</div>;
+              return null;
+            })}
+          </div>
+        </div>
+
+        {/* Day picker */}
+        <div style={{ padding: "14px 20px" }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
+            Copy to which days?
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {otherDays.map(day => {
+              const dayItems = Array.isArray(weekPlan[day]?.[target.meal])
+                ? weekPlan[day][target.meal]
+                : (weekPlan[day]?.[target.meal] ? [{ type: "recipe", recipeId: weekPlan[day][target.meal] }] : []);
+              const hasItems = dayItems.length > 0;
+              const checked = selectedDays.includes(day);
+              return (
+                <label key={day} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8, background: checked ? "#f0ece6" : "#fff", border: "1.5px solid", borderColor: checked ? "#c8a03c" : "#e8e0d4", cursor: "pointer" }}>
+                  <input type="checkbox" checked={checked} onChange={() => toggle(day)} style={{ accentColor: "#c8a03c", width: 15, height: 15, cursor: "pointer" }} />
+                  <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: "#1c1915" }}>{day}</span>
+                  {hasItems && (
+                    <span style={{ fontSize: 11, color: "#a09080" }}>replaces {dayItems.length} item{dayItems.length !== 1 ? "s" : ""}</span>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: "0 20px 18px", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button onClick={onClose} style={{ background: "none", border: "1.5px solid #e8e0d4", borderRadius: 8, padding: "8px 18px", fontSize: 13, color: "#8a7f72", cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>Cancel</button>
+          <button
+            onClick={() => { if (selectedDays.length) { onCopy(selectedDays); onClose(); } }}
+            disabled={selectedDays.length === 0}
+            style={{ background: selectedDays.length ? "#1c1915" : "#e8e0d4", color: selectedDays.length ? "#f5f0e8" : "#c0b8ac", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13, fontWeight: 500, cursor: selectedDays.length ? "pointer" : "default", fontFamily: "'DM Sans', sans-serif" }}
+          >
+            Copy to {selectedDays.length > 0 ? `${selectedDays.length} day${selectedDays.length > 1 ? "s" : ""}` : "…"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── RecipeCalEditorModal ──────────────────────────────────────────────────────
 
 function RecipeCalEditorModal({ recipe, recipeEdits, onAdd, onClose }) {
@@ -2506,6 +2605,7 @@ export default function MealPlannerApp() {
   const [driveError, setDriveError] = useState(null);
   const [lastSyncTime, setLastSyncTime] = useState(null);
   const [addMealTarget, setAddMealTarget] = useState(null); // { day, meal } | null
+  const [copySlotTarget, setCopySlotTarget] = useState(null); // { day, meal } | null
 
   const plan = plans[weekOffset] ?? EMPTY_PLAN;
 
@@ -2928,6 +3028,19 @@ export default function MealPlannerApp() {
     });
   }
 
+  function copyMealSlot(fromDay, meal, toDays) {
+    setPlans(prev => {
+      const cur = prev[weekOffset] ?? EMPTY_PLAN;
+      const sourceItems = Array.isArray(cur[fromDay]?.[meal]) ? cur[fromDay][meal] : [];
+      const copied = sourceItems.map(item => ({ ...item }));
+      let next = { ...cur };
+      toDays.forEach(toDay => {
+        next = { ...next, [toDay]: { ...next[toDay], [meal]: copied } };
+      });
+      return { ...prev, [weekOffset]: next };
+    });
+  }
+
   function addToPlan(day, meal, item) {
     setPlans(prev => {
       const cur = prev[weekOffset] ?? EMPTY_PLAN;
@@ -3222,6 +3335,19 @@ export default function MealPlannerApp() {
         />
       )}
 
+      {/* Copy Meal Modal */}
+      {copySlotTarget && (
+        <CopyMealModal
+          target={copySlotTarget}
+          plans={plans}
+          weekOffset={weekOffset}
+          recipes={recipes}
+          recipeEdits={recipeEdits}
+          onCopy={toDays => copyMealSlot(copySlotTarget.day, copySlotTarget.meal, toDays)}
+          onClose={() => setCopySlotTarget(null)}
+        />
+      )}
+
       {/* Create Recipe Modal */}
       {showCreateRecipe && (
         <CreateRecipeModal
@@ -3456,14 +3582,25 @@ export default function MealPlannerApp() {
                                         }
                                         return null;
                                       })}
-                                      <button
-                                        onClick={() => setAddMealTarget({ day, meal })}
-                                        style={{
-                                          background: "none", border: "1px dashed #d4c9b8", borderRadius: 6,
-                                          padding: "3px 6px", fontSize: 10, color: "#c0b8ac", cursor: "pointer",
-                                          fontFamily: "'DM Sans', sans-serif", textAlign: "center", marginTop: 2,
-                                        }}
-                                      >+ add</button>
+                                      <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
+                                        <button
+                                          onClick={() => setAddMealTarget({ day, meal })}
+                                          style={{
+                                            flex: 1, background: "none", border: "1px dashed #d4c9b8", borderRadius: 6,
+                                            padding: "3px 6px", fontSize: 10, color: "#c0b8ac", cursor: "pointer",
+                                            fontFamily: "'DM Sans', sans-serif", textAlign: "center",
+                                          }}
+                                        >+ add</button>
+                                        <button
+                                          onClick={() => setCopySlotTarget({ day, meal })}
+                                          title="Copy to other days"
+                                          style={{
+                                            background: "none", border: "1px dashed #d4c9b8", borderRadius: 6,
+                                            padding: "3px 6px", fontSize: 10, color: "#c0b8ac", cursor: "pointer",
+                                            lineHeight: 1,
+                                          }}
+                                        >⎘</button>
+                                      </div>
                                     </>
                                   )}
                                 </div>
