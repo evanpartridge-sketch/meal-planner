@@ -159,11 +159,23 @@ function generateShoppingItems(plan, recipes, recipeEdits, manualItems, qtyOverr
 
 function generateShoppingItemsFromCart(cartItems, recipes, recipeEdits, manualItems, qtyOverrides, servingOverrides = {}) {
   const itemMap = {};
-  (cartItems || []).forEach(({ recipeId, servings: slotServings }) => {
+  (cartItems || []).forEach(cartItem => {
+    // Freeform items with ingredients
+    if (cartItem.type === "freeform") {
+      (cartItem.ingredients || []).forEach(ing => {
+        const key = ing.toLowerCase().trim();
+        if (!itemMap[key]) itemMap[key] = { key, origText: ing, scaledText: ing, count: 0, isManual: false };
+        itemMap[key].count++;
+      });
+      return;
+    }
+    // Recipe items (support both old { recipeId } and new { type:"recipe", recipeId })
+    const recipeId = cartItem.recipeId;
+    if (!recipeId) return;
     const r = recipes.find(rec => rec.id === recipeId);
     if (!r) return;
     const baseServings = parseServings(r.yield);
-    const targetServings = servingOverrides[recipeId] ?? slotServings ?? baseServings;
+    const targetServings = servingOverrides[recipeId] ?? cartItem.servings ?? baseServings;
     const ratio = baseServings > 0 ? targetServings / baseServings : 1;
     const ings = recipeEdits[recipeId]?.ingredients ?? r.ingredients ?? [];
     ings.forEach(ing => {
@@ -1820,13 +1832,161 @@ function RecipeCalEditorModal({ recipe, recipeEdits, onAdd, onClose }) {
   );
 }
 
+// ─── FreeformEditorModal ───────────────────────────────────────────────────────
+
+function FreeformEditorModal({ item, onSave, onClose }) {
+  const [name, setName] = useState(item.text || "");
+  const [calories, setCalories] = useState(item.calories != null ? String(item.calories) : "");
+  const [ingredients, setIngredients] = useState(item.ingredients ? [...item.ingredients] : []);
+  const [newIng, setNewIng] = useState("");
+
+  useEffect(() => {
+    function handleKey(e) { if (e.key === "Escape") onClose(); }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  function addIngredient() {
+    const v = newIng.trim();
+    if (!v) return;
+    setIngredients(prev => [...prev, v]);
+    setNewIng("");
+  }
+
+  function removeIngredient(idx) {
+    setIngredients(prev => prev.filter((_, i) => i !== idx));
+  }
+
+  function save() {
+    if (!name.trim()) return;
+    const calNum = calories.trim() ? parseInt(calories, 10) : null;
+    onSave({
+      text: name.trim(),
+      calories: !isNaN(calNum) && calNum != null ? calNum : undefined,
+      ingredients: ingredients.length > 0 ? ingredients : undefined,
+    });
+    onClose();
+  }
+
+  const inputStyle = {
+    width: "100%", boxSizing: "border-box", padding: "9px 12px",
+    border: "1.5px solid #e8e0d4", borderRadius: 8, fontSize: 13,
+    fontFamily: "'DM Sans', sans-serif", color: "#1c1915", background: "#faf7f2", outline: "none",
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(28,25,21,0.55)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 1100, padding: 16,
+    }}>
+      <div style={{
+        background: "#fff", borderRadius: 16, width: "100%", maxWidth: 460,
+        boxShadow: "0 8px 40px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column",
+        maxHeight: "85vh", overflow: "hidden",
+      }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px 12px", borderBottom: "1px solid #e8e0d4", flexShrink: 0 }}>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, fontWeight: 600, color: "#1c1915" }}>
+            ✏️ Edit Item
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "#8a7f72", lineHeight: 1, padding: 0 }}>×</button>
+        </div>
+
+        <div style={{ padding: "16px 20px", overflowY: "auto", display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Name */}
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Name</div>
+            <input
+              autoFocus
+              value={name}
+              onChange={e => setName(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") save(); }}
+              style={inputStyle}
+            />
+          </div>
+
+          {/* Calories */}
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Calories <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>(optional)</span></div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="number"
+                value={calories}
+                onChange={e => setCalories(e.target.value)}
+                placeholder="e.g. 350"
+                style={{ ...inputStyle, width: 120 }}
+              />
+              <span style={{ fontSize: 13, color: "#8a7f72" }}>cal / serving</span>
+            </div>
+          </div>
+
+          {/* Ingredients */}
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#8a7f72", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+              Ingredients <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>(for shopping list)</span>
+            </div>
+            {ingredients.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
+                {ingredients.map((ing, idx) => (
+                  <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, background: "#faf7f2", border: "1px solid #e8e0d4", borderRadius: 7, padding: "7px 10px" }}>
+                    <span style={{ flex: 1, fontSize: 13, color: "#1c1915" }}>{ing}</span>
+                    <button onClick={() => removeIngredient(idx)} style={{ background: "none", border: "none", cursor: "pointer", color: "#c0b8ac", fontSize: 16, lineHeight: 1, padding: 0, flexShrink: 0 }}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                value={newIng}
+                onChange={e => setNewIng(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addIngredient(); } }}
+                placeholder="e.g. 1 cup Greek yogurt"
+                style={{ ...inputStyle, flex: 1 }}
+              />
+              <button
+                onClick={addIngredient}
+                disabled={!newIng.trim()}
+                style={{
+                  background: newIng.trim() ? "#1c1915" : "#e8e0d4",
+                  color: newIng.trim() ? "#fff" : "#c0b8ac",
+                  border: "none", borderRadius: 8, padding: "9px 14px",
+                  fontSize: 13, fontWeight: 500, cursor: newIng.trim() ? "pointer" : "default",
+                  fontFamily: "'DM Sans', sans-serif", flexShrink: 0,
+                }}
+              >Add</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: "12px 20px", borderTop: "1px solid #e8e0d4", flexShrink: 0 }}>
+          <button
+            onClick={save}
+            disabled={!name.trim()}
+            style={{
+              width: "100%", padding: "10px 0",
+              background: name.trim() ? "#1c1915" : "#e8e0d4",
+              color: name.trim() ? "#fff" : "#c0b8ac",
+              border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600,
+              cursor: name.trim() ? "pointer" : "default",
+              fontFamily: "'DM Sans', sans-serif",
+            }}
+          >Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── BuildMealModal ────────────────────────────────────────────────────────────
 
-function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRecipe, onAddFreeform, onUpdateServings, onUpdateItemCals, onRemoveItem, onAddToCart, onClose }) {
+function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRecipe, onAddFreeform, onUpdateServings, onUpdateItemCals, onUpdateFreeformItem, onRemoveItem, onAddToCart, onClose }) {
   const [innerTab, setInnerTab] = useState("library");
   const [libSearch, setLibSearch] = useState("");
   const [freeformText, setFreeformText] = useState("");
-  const [calEditorIndex, setCalEditorIndex] = useState(null); // index into currentItems
+  const [calEditorIndex, setCalEditorIndex] = useState(null); // index into currentItems for recipe cal editor
+  const [freeformEditorIndex, setFreeformEditorIndex] = useState(null); // index into currentItems for freeform editor
   const [cartAdded, setCartAdded] = useState(false);
 
   useEffect(() => {
@@ -1941,8 +2101,21 @@ function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRe
                 if (item.type === "freeform") {
                   return (
                     <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", border: "1.5px solid #e8e0d4", borderRadius: 8, padding: "8px 10px" }}>
-                      <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: "#3d5a4a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        ✏️ {item.text}
+                      <div onClick={() => setFreeformEditorIndex(idx)} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: "#3d5a4a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          ✏️ {item.text}
+                        </div>
+                        {(item.calories != null || item.ingredients?.length > 0) && (
+                          <div style={{ fontSize: 11, color: "#8a7f72", marginTop: 1 }}>
+                            {item.calories != null && `${item.calories} cal`}
+                            {item.calories != null && item.ingredients?.length > 0 && " · "}
+                            {item.ingredients?.length > 0 && `${item.ingredients.length} ingredient${item.ingredients.length !== 1 ? "s" : ""}`}
+                            <span style={{ color: "#c0b8ac", marginLeft: 4 }}>edit</span>
+                          </div>
+                        )}
+                        {item.calories == null && !item.ingredients?.length && (
+                          <div style={{ fontSize: 11, color: "#c0b8ac", marginTop: 1 }}>tap to add calories & ingredients</div>
+                        )}
                       </div>
                       <button onClick={() => onRemoveItem(idx)} style={{ background: "none", border: "none", cursor: "pointer", color: "#c0b8ac", fontSize: 16, padding: "0 2px", lineHeight: 1, flexShrink: 0 }}>×</button>
                     </div>
@@ -1951,7 +2124,7 @@ function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRe
                 return null;
               })}
             </div>
-            {currentItems.some(i => i.type === "recipe") && (
+            {currentItems.some(i => i.type === "recipe" || (i.type === "freeform" && i.ingredients?.length > 0)) && (
               <button
                 onClick={() => {
                   onAddToCart(currentItems);
@@ -2102,6 +2275,18 @@ function BuildMealModal({ target, recipes, recipeEdits, currentItems, onSelectRe
           />
         );
       })()}
+
+      {/* Freeform item editor sub-modal */}
+      {freeformEditorIndex != null && currentItems[freeformEditorIndex]?.type === "freeform" && (
+        <FreeformEditorModal
+          item={currentItems[freeformEditorIndex]}
+          onSave={data => {
+            onUpdateFreeformItem(freeformEditorIndex, data);
+            setFreeformEditorIndex(null);
+          }}
+          onClose={() => setFreeformEditorIndex(null)}
+        />
+      )}
     </div>
   );
 }
@@ -2243,9 +2428,9 @@ function ShoppingListTab({ cartItems, recipes, recipeEdits, checkedItems, onSetC
   useEffect(() => { localStorage.setItem("mealplanner_hidden_items", JSON.stringify([...hidden])); }, [hidden]);
   useEffect(() => { localStorage.setItem("mealplanner_serving_overrides", JSON.stringify(servingOverrides)); }, [servingOverrides]);
 
-  // Recipes in the cart with their serving counts
+  // Recipes in the cart with their serving counts (recipe-type only)
   const cartRecipes = useMemo(() => {
-    return (cartItems || []).map(({ recipeId, servings: slotServings }) => {
+    return (cartItems || []).filter(c => c.type !== "freeform" && c.recipeId).map(({ recipeId, servings: slotServings }) => {
       const recipe = recipes.find(r => r.id === recipeId);
       if (!recipe) return null;
       const baseServings = parseServings(recipe.yield);
@@ -2912,16 +3097,25 @@ export default function MealPlannerApp() {
   }, [cartItems]);
 
   function addToCart(slotItems) {
-    const recipeItems = slotItems.filter(i => i.type === "recipe");
-    if (!recipeItems.length) return;
+    const cartable = slotItems.filter(i =>
+      i.type === "recipe" || (i.type === "freeform" && i.ingredients?.length > 0)
+    );
+    if (!cartable.length) return;
     setCartItems(prev => {
       const next = [...prev];
-      recipeItems.forEach(item => {
-        const existing = next.find(c => c.recipeId === item.recipeId);
-        if (existing) {
-          existing.servings = (existing.servings || 1) + (item.servings || 1);
-        } else {
-          next.push({ recipeId: item.recipeId, servings: item.servings || 1 });
+      cartable.forEach(item => {
+        if (item.type === "recipe") {
+          const existing = next.find(c => !c.type || (c.type === "recipe" && c.recipeId === item.recipeId));
+          if (existing) {
+            existing.servings = (existing.servings || 1) + (item.servings || 1);
+          } else {
+            next.push({ type: "recipe", recipeId: item.recipeId, servings: item.servings || 1 });
+          }
+        } else if (item.type === "freeform") {
+          const existingIdx = next.findIndex(c => c.type === "freeform" && c.text === item.text);
+          const cartEntry = { type: "freeform", text: item.text, ingredients: item.ingredients, calories: item.calories };
+          if (existingIdx >= 0) { next[existingIdx] = cartEntry; }
+          else { next.push(cartEntry); }
         }
       });
       return next;
@@ -3280,6 +3474,15 @@ export default function MealPlannerApp() {
     });
   }
 
+  function updateSlotFreeformItem(day, meal, index, data) {
+    setPlans(prev => {
+      const cur = prev[weekOffset] ?? EMPTY_PLAN;
+      const arr = [...(Array.isArray(cur[day]?.[meal]) ? cur[day][meal] : [])];
+      arr[index] = { ...arr[index], ...data };
+      return { ...prev, [weekOffset]: { ...cur, [day]: { ...cur[day], [meal]: arr } } };
+    });
+  }
+
   function copyMealSlot(fromDay, meal, toDays) {
     setPlans(prev => {
       const cur = prev[weekOffset] ?? EMPTY_PLAN;
@@ -3583,6 +3786,7 @@ export default function MealPlannerApp() {
           }}
           onUpdateServings={(index, servings) => updateSlotItemServings(addMealTarget.day, addMealTarget.meal, index, servings)}
           onRemoveItem={index => removeFromPlan(addMealTarget.day, addMealTarget.meal, index)}
+          onUpdateFreeformItem={(index, data) => updateSlotFreeformItem(addMealTarget.day, addMealTarget.meal, index, data)}
           onAddToCart={items => addToCart(items)}
           onClose={() => setAddMealTarget(null)}
         />
